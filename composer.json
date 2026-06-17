@@ -1,0 +1,39 @@
+{
+    "name": "componenta/config",
+    "description": "Immutable configuration container with dot notation, callable support, and caching",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "config",
+        "configuration",
+        "dotenv",
+        "environment",
+        "settings"
+    ],
+    "require": {
+        "php": ">=8.4",
+        "componenta/arrayable": "^1.0",
+        "psr/container": "^2.0",
+        "componenta/var-export": "^1.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Componenta\\Config\\": "src/"
+        },
+        "files": [
+            "src/functions.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Componenta\\Config\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable"
+}
