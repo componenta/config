@@ -135,7 +135,7 @@ class ConfigProvider
     /**
      * Get factory definitions.
      *
-     * @return array<string, string|callable>
+     * @return array<string, string|callable(\Componenta\Config\ContainerValue, array<string|int, mixed>):mixed>
      */
     protected function getFactories(): array
     {
