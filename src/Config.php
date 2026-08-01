@@ -102,7 +102,7 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
 
     private function resolveValue(mixed $value): mixed
     {
-        if ($value instanceof LazyValue) {
+        if ($value instanceof ResolvableValueInterface) {
             return $value->resolve($this);
         }
 
@@ -366,6 +366,7 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
             }
 
             $current = $current[$segment];
+            $current = $this->resolveValue($current);
         }
 
         $found = true;

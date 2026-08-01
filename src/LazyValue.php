@@ -6,7 +6,7 @@ namespace Componenta\Config;
 
 use Closure;
 
-final class LazyValue
+final class LazyValue implements ResolvableValueInterface
 {
     public Closure $callback;
     private bool $resolved = false;

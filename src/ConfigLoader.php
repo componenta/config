@@ -92,7 +92,21 @@ final class ConfigLoader
                 $environment = new Environment($cached['environment']);
             }
 
-            return new Config($cached['config'] ?? [], $environment);
+            $config = $cached['config'] ?? [];
+
+            if (!is_array($config)) {
+                throw new ConfigException('Invalid cached configuration data');
+            }
+
+            foreach ($config as $key => $value) {
+                if ($value instanceof FileValue && !self::isAbsolutePath($value->file)) {
+                    $config[$key] = new FileValue(
+                        dirname($file) . DIRECTORY_SEPARATOR . $value->file,
+                    );
+                }
+            }
+
+            return new Config($config, $environment);
 
         } catch (ConfigException $e) {
             throw $e;
@@ -204,5 +218,15 @@ final class ConfigLoader
         }
 
         return $merged;
+    }
+
+    private static function isAbsolutePath(string $path): bool
+    {
+        if ($path === '') {
+            return false;
+        }
+
+        return $path[0] === '/' || $path[0] === '\\'
+            || (strlen($path) > 2 && ctype_alpha($path[0]) && $path[1] === ':');
     }
 }
