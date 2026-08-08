@@ -17,7 +17,7 @@
         "componenta/var-export": "^1.0"
     },
     "require-dev": {
-        "phpunit/phpunit": "^11.0"
+        "pestphp/pest": "^4.0"
     },
     "autoload": {
         "psr-4": {
@@ -33,6 +33,9 @@
         }
     },
     "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        },
         "sort-packages": true
     },
     "minimum-stability": "stable"

@@ -42,7 +42,7 @@ namespace Componenta\Config;
  */
 class ConfigProvider
 {
-    /** @var callable[] */
+    /** @var list<callable(): array<string, mixed>> */
     private readonly array $childProviders;
 
     final public function __construct()
@@ -51,6 +51,7 @@ class ConfigProvider
     }
 
     /**
+     * @return array<array-key, mixed>
      * Get complete configuration array.
      */
     public function __invoke(): array
@@ -76,7 +77,7 @@ class ConfigProvider
     /**
      * Get child configuration providers.
      *
-     * @return callable[]
+     * @return list<callable(): array<string, mixed>>
      */
     protected function getProviders(): array
     {
@@ -85,6 +86,7 @@ class ConfigProvider
 
     /**
      * Get application configuration.
+     * @return array<string, mixed>
      */
     protected function getConfig(): array
     {
@@ -93,21 +95,45 @@ class ConfigProvider
 
     /**
      * Get dependency injection configuration.
+     * @return array<string, mixed>
      */
-    protected function getDependencies(): array
+    final protected function getDependencies(): array
     {
         [$invokables, $invokableAliases] = $this->normalizeInvokables($this->getInvokables());
 
-        return array_filter([
+        $dependencies = [
             ConfigKey::FACTORIES => $this->getFactories(),
             ConfigKey::INVOKABLES => $invokables,
-            ConfigKey::AUTOWIRES => $this->getAutowires(),
             ConfigKey::ALIASES => array_merge($this->getAliases(), $invokableAliases),
             ConfigKey::DELEGATORS => $this->getDelegators(),
             ConfigKey::SERVICES => $this->getServices(),
             ConfigKey::PARAMETER_RESOLVERS => $this->getParameterResolvers(),
-            ConfigKey::PROPERTY_RESOLVERS => $this->getPropertyResolvers(),
-        ]);
+            ConfigKey::PARAMETER_RESOLVERS_REPLACE => $this->shouldReplaceParameterResolvers(),
+            ConfigKey::ATTRIBUTE_HANDLERS => $this->getAttributeHandlers(),
+            ConfigKey::ATTRIBUTE_HANDLERS_REPLACE => $this->shouldReplaceAttributeHandlers(),
+        ];
+
+        foreach ($this->getDependencyExtensions() as $key => $value) {
+            if (!is_string($key) || !in_array($key, ConfigKey::dependencyKeys(), true)) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Unsupported dependency configuration key "%s".',
+                    (string) $key,
+                ));
+            }
+
+            if (array_key_exists($key, $dependencies)) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Dependency extension cannot replace base key "%s".',
+                    $key,
+                ));
+            }
+
+            $dependencies[$key] = $value;
+        }
+
+        return array_filter($dependencies, static fn(mixed $value): bool => $value !== []
+            && $value !== null
+            && $value !== false);
     }
 
     /**
@@ -156,16 +182,6 @@ class ConfigProvider
     }
 
     /**
-     * Get autowired service definitions.
-     *
-     * @return list<class-string>
-     */
-    protected function getAutowires(): array
-    {
-        return [];
-    }
-
-    /**
      * Get service aliases.
      *
      * @return array<string, string>
@@ -208,12 +224,39 @@ class ConfigProvider
     }
 
     /**
-     * Get custom property resolvers, keyed by priority. See
-     * {@see getParameterResolvers()} for accepted value shapes.
-     *
-     * @return array<int, mixed>
+     * Whether custom parameter resolvers replace the default resolver chain.
      */
-    protected function getPropertyResolvers(): array
+    protected function shouldReplaceParameterResolvers(): bool
+    {
+        return false;
+    }
+
+    /**
+     * Get runtime attribute handlers in registration order.
+     *
+     * @return list<mixed>
+     */
+    protected function getAttributeHandlers(): array
+    {
+        return [];
+    }
+
+    /**
+     * Whether custom attribute handlers replace all built-in handlers.
+     */
+    protected function shouldReplaceAttributeHandlers(): bool
+    {
+        return false;
+    }
+
+    /**
+     * Get supported DI metadata not represented by the base hooks above.
+     *
+     * Extensions cannot replace base sections and unknown keys are rejected.
+     *
+     * @return array<array-key, mixed>
+     */
+    protected function getDependencyExtensions(): array
     {
         return [];
     }

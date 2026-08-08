@@ -38,9 +38,6 @@ class ConfigKey
     /** Service aliases: alias => target */
     public final const string ALIASES = 'aliases';
 
-    /** Classes for autowiring: list<class-string> */
-    public final const string AUTOWIRES = 'autowires';
-
     /** Delegator factories: id => list<callable|class-string> */
     public final const string DELEGATORS = 'delegators';
 
@@ -53,14 +50,21 @@ class ConfigKey
     /** Custom parameter resolvers: priority => class-string|callable|ParameterResolverInterface */
     public final const string PARAMETER_RESOLVERS = 'parameter_resolvers';
 
-    /** Custom property resolvers: priority => class-string|callable|PropertyResolverInterface */
-    public final const string PROPERTY_RESOLVERS = 'property_resolvers';
-
     /** When true, the default parameter resolver chain is NOT installed; only the user-supplied resolvers are. */
     public final const string PARAMETER_RESOLVERS_REPLACE = 'parameter_resolvers_replace';
 
-    /** When true, the default property resolver chain is NOT installed; only the user-supplied resolvers are. */
-    public final const string PROPERTY_RESOLVERS_REPLACE = 'property_resolvers_replace';
+    /** Runtime attribute handlers in registration order. */
+    public final const string ATTRIBUTE_HANDLERS = 'attribute_handlers';
+
+    /** When true, only explicitly configured attribute handlers are installed. */
+    public final const string ATTRIBUTE_HANDLERS_REPLACE = 'attribute_handlers_replace';
+
+    /** Generated EntryResolver PHP file loaded before the reflection fallback. */
+    public final const string GENERATED_ENTRY_RESOLVER_FILE = 'generated_entry_resolver_file';
+
+    /** Stable release identifier used instead of hashing generated source files. */
+    public final const string GENERATED_ENTRY_RESOLVER_RELEASE_FINGERPRINT
+        = 'generated_entry_resolver_release_fingerprint';
 
     /**
      * Merge marker: when present in an array, numeric keys
@@ -81,10 +85,14 @@ class ConfigKey
             self::FACTORIES,
             self::INVOKABLES,
             self::ALIASES,
-            self::AUTOWIRES,
             self::DELEGATORS,
             self::SERVICES,
-            self::CONFIG,
+            self::PARAMETER_RESOLVERS,
+            self::PARAMETER_RESOLVERS_REPLACE,
+            self::ATTRIBUTE_HANDLERS,
+            self::ATTRIBUTE_HANDLERS_REPLACE,
+            self::GENERATED_ENTRY_RESOLVER_FILE,
+            self::GENERATED_ENTRY_RESOLVER_RELEASE_FINGERPRINT,
         ];
     }
 }

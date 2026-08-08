@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Componenta\Config\Tests;
 
+use Componenta\Config\ConfigKey;
 use Componenta\Config\ConfigProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -90,18 +91,54 @@ final class ConfigProviderTest extends TestCase
         ], $config['dependencies']['aliases']);
     }
 
-    public function testInvokeReturnsAutowires(): void
+    public function testInvokeReturnsVersionTwoExtensionConfiguration(): void
     {
         $provider = new class extends ConfigProvider {
-            protected function getAutowires(): array
+            protected function getServices(): array
             {
-                return ['ServiceA', 'ServiceB'];
+                return ['feature.enabled' => false];
+            }
+
+            protected function getParameterResolvers(): array
+            {
+                return [100 => 'ResolverA'];
+            }
+
+            protected function shouldReplaceParameterResolvers(): bool
+            {
+                return true;
+            }
+
+            protected function getAttributeHandlers(): array
+            {
+                return ['HandlerA'];
+            }
+
+            protected function shouldReplaceAttributeHandlers(): bool
+            {
+                return true;
+            }
+
+            protected function getDependencyExtensions(): array
+            {
+                return [
+                    ConfigKey::GENERATED_ENTRY_RESOLVER_FILE => 'runtime/container.resolver.php',
+                    ConfigKey::GENERATED_ENTRY_RESOLVER_RELEASE_FINGERPRINT => 'release-42',
+                ];
             }
         };
 
         $config = $provider();
 
-        self::assertSame(['ServiceA', 'ServiceB'], $config['dependencies']['autowires']);
+        self::assertSame([
+            ConfigKey::SERVICES => ['feature.enabled' => false],
+            ConfigKey::PARAMETER_RESOLVERS => [100 => 'ResolverA'],
+            ConfigKey::PARAMETER_RESOLVERS_REPLACE => true,
+            ConfigKey::ATTRIBUTE_HANDLERS => ['HandlerA'],
+            ConfigKey::ATTRIBUTE_HANDLERS_REPLACE => true,
+            ConfigKey::GENERATED_ENTRY_RESOLVER_FILE => 'runtime/container.resolver.php',
+            ConfigKey::GENERATED_ENTRY_RESOLVER_RELEASE_FINGERPRINT => 'release-42',
+        ], $config[ConfigKey::DEPENDENCIES]);
     }
 
     public function testInvokeReturnsDelegators(): void
@@ -178,13 +215,66 @@ final class ConfigProviderTest extends TestCase
 
         $config = $provider();
 
-        self::assertArrayHasKey('factories', $config['dependencies']);
-        self::assertArrayNotHasKey('invokables', $config['dependencies']);
-        self::assertArrayNotHasKey('autowires', $config['dependencies']);
-        self::assertArrayNotHasKey('aliases', $config['dependencies']);
-        self::assertArrayNotHasKey('delegators', $config['dependencies']);
-        self::assertArrayNotHasKey('services', $config['dependencies']);
+        self::assertSame([
+            ConfigKey::FACTORIES => ['Service' => 'Factory'],
+        ], $config[ConfigKey::DEPENDENCIES]);
     }
+
+    public function testDependencyExtensionsRejectUnknownKeys(): void
+    {
+        $provider = new class extends ConfigProvider {
+            protected function getDependencyExtensions(): array
+            {
+                return ['unknown' => true];
+            }
+        };
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Unsupported dependency configuration key "unknown".');
+
+        $provider();
+    }
+
+    public function testDependencyExtensionsCannotReplaceBaseKeys(): void
+    {
+        $provider = new class extends ConfigProvider {
+            protected function getDependencyExtensions(): array
+            {
+                return [ConfigKey::FACTORIES => ['Service' => 'Factory']];
+            }
+        };
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Dependency extension cannot replace base key "factories".');
+
+        $provider();
+    }
+
+    public function testVersionTwoSchemaDoesNotExposeLegacyKeys(): void
+    {
+        self::assertSame([
+            ConfigKey::FACTORIES,
+            ConfigKey::INVOKABLES,
+            ConfigKey::ALIASES,
+            ConfigKey::DELEGATORS,
+            ConfigKey::SERVICES,
+            ConfigKey::PARAMETER_RESOLVERS,
+            ConfigKey::PARAMETER_RESOLVERS_REPLACE,
+            ConfigKey::ATTRIBUTE_HANDLERS,
+            ConfigKey::ATTRIBUTE_HANDLERS_REPLACE,
+            ConfigKey::GENERATED_ENTRY_RESOLVER_FILE,
+            ConfigKey::GENERATED_ENTRY_RESOLVER_RELEASE_FINGERPRINT,
+        ], ConfigKey::dependencyKeys());
+
+        self::assertFalse(defined(ConfigKey::class . '::AUTOWIRES'));
+        self::assertFalse(defined(ConfigKey::class . '::PROPERTY_RESOLVERS'));
+        self::assertFalse(defined(ConfigKey::class . '::PROPERTY_RESOLVERS_REPLACE'));
+        self::assertFalse(method_exists(ConfigProvider::class, 'getAutowires'));
+        self::assertFalse(method_exists(ConfigProvider::class, 'getPropertyResolvers'));
+        self::assertTrue(method_exists(ConfigProvider::class, 'getDependencyExtensions'));
+        self::assertTrue((new \ReflectionMethod(ConfigProvider::class, 'getDependencies'))->isFinal());
+    }
+
 }
 
 // =========================================================================

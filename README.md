@@ -228,12 +228,14 @@ The base provider builds the final array from overridable sections:
 | `getConfig()` | Application/package config outside `dependencies`. |
 | `getFactories()` | Service factories, keyed by service id. |
 | `getInvokables()` | Classes instantiated directly; keyed entries also create aliases. |
-| `getAutowires()` | Classes resolved through autowiring. |
 | `getAliases()` | Explicit service aliases. |
 | `getDelegators()` | Delegator factories, keyed by decorated service id. |
 | `getServices()` | Pre-built service instances. |
 | `getParameterResolvers()` | Custom constructor/method parameter resolvers keyed by priority. |
-| `getPropertyResolvers()` | Custom property resolvers keyed by priority. |
+| `shouldReplaceParameterResolvers()` | Replaces the default parameter resolver chain when `true`. |
+| `getAttributeHandlers()` | Runtime attribute handlers in registration order. |
+| `shouldReplaceAttributeHandlers()` | Replaces the built-in attribute handlers when `true`. |
+| `getDependencyExtensions()` | Additional supported DI v2 keys not represented by the base hooks. Unknown keys and attempts to replace a base section are rejected. |
 
 ```php
 use Componenta\Config\ConfigProvider;
@@ -264,3 +266,18 @@ final class AppConfigProvider extends ConfigProvider
 ```
 
 Calling a provider returns a config array with a `dependencies` section.
+
+Empty arrays, `null`, and default `false` values are omitted from that section. Values nested inside a section are preserved, so a service whose value is `false` is not removed. The v1 `autowires` and property-resolver sections are not part of the v2 schema; normal concrete classes are autowired by DI v2, while attributes are handled through `getAttributeHandlers()`.
+
+## Factories And Aliases
+
+Do not register a factory or invokable under an id that is also an alias. DI resolves the alias first, so the definition under the requested id would be unreachable. Register competing implementations directly under the same interface id and let provider order select one:
+
+```php
+protected function getFactories(): array
+{
+    return [ServiceInterface::class => ServiceFactory::class];
+}
+```
+
+Use a delegator when a package must add behavior around whichever implementation was selected. A later factory selects a replacement implementation; it does not disable delegators registered for that requested id.
