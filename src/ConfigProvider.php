@@ -112,6 +112,8 @@ class ConfigProvider
             ConfigKey::ATTRIBUTE_HANDLERS => $this->getAttributeHandlers(),
             ConfigKey::ATTRIBUTE_HANDLERS_REPLACE => $this->shouldReplaceAttributeHandlers(),
         ];
+        $replaceParameterResolvers = $dependencies[ConfigKey::PARAMETER_RESOLVERS_REPLACE];
+        $replaceAttributeHandlers = $dependencies[ConfigKey::ATTRIBUTE_HANDLERS_REPLACE];
 
         foreach ($this->getDependencyExtensions() as $key => $value) {
             if (!is_string($key) || !in_array($key, ConfigKey::dependencyKeys(), true)) {
@@ -131,9 +133,48 @@ class ConfigProvider
             $dependencies[$key] = $value;
         }
 
-        return array_filter($dependencies, static fn(mixed $value): bool => $value !== []
-            && $value !== null
-            && $value !== false);
+        $hasParameterResolverReplaceFlag = $replaceParameterResolvers
+            || $this->isHookOverridden('shouldReplaceParameterResolvers');
+        $hasAttributeHandlerReplaceFlag = $replaceAttributeHandlers
+            || $this->isHookOverridden('shouldReplaceAttributeHandlers');
+
+        return array_filter(
+            $dependencies,
+            static function (mixed $value, int|string $key) use (
+                $hasParameterResolverReplaceFlag,
+                $hasAttributeHandlerReplaceFlag,
+            ): bool {
+                if ($value === [] || $value === null) {
+                    return false;
+                }
+
+                if ($value !== false) {
+                    return true;
+                }
+
+                return ($key === ConfigKey::PARAMETER_RESOLVERS_REPLACE
+                        && $hasParameterResolverReplaceFlag)
+                    || ($key === ConfigKey::ATTRIBUTE_HANDLERS_REPLACE
+                        && $hasAttributeHandlerReplaceFlag);
+            },
+            ARRAY_FILTER_USE_BOTH,
+        );
+    }
+
+    /**
+     * A false replacement flag is meaningful only when a provider explicitly
+     * overrides the corresponding hook. The inherited base false remains the
+     * omitted default and therefore cannot accidentally cancel an earlier true.
+     */
+    private function isHookOverridden(string $method): bool
+    {
+        static $cache = [];
+
+        $class = static::class;
+
+        return $cache[$class][$method] ??= (new \ReflectionMethod($class, $method))
+            ->getDeclaringClass()
+            ->getName() !== self::class;
     }
 
     /**
@@ -225,6 +266,9 @@ class ConfigProvider
 
     /**
      * Whether custom parameter resolvers replace the default resolver chain.
+     *
+     * An inherited false is omitted. A provider that overrides this hook and
+     * returns false explicitly can cancel an earlier true during composition.
      */
     protected function shouldReplaceParameterResolvers(): bool
     {
@@ -243,6 +287,9 @@ class ConfigProvider
 
     /**
      * Whether custom attribute handlers replace all built-in handlers.
+     *
+     * An inherited false is omitted. A provider that overrides this hook and
+     * returns false explicitly can cancel an earlier true during composition.
      */
     protected function shouldReplaceAttributeHandlers(): bool
     {

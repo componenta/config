@@ -232,9 +232,9 @@ The base provider builds the final array from overridable sections:
 | `getDelegators()` | Delegator factories, keyed by decorated service id. |
 | `getServices()` | Pre-built service instances. |
 | `getParameterResolvers()` | Custom constructor/method parameter resolvers keyed by priority. |
-| `shouldReplaceParameterResolvers()` | Replaces the default parameter resolver chain when `true`. |
+| `shouldReplaceParameterResolvers()` | `true` replaces the default resolver chain; an explicitly overridden `false` can cancel an earlier `true`. |
 | `getAttributeHandlers()` | Runtime attribute handlers in registration order. |
-| `shouldReplaceAttributeHandlers()` | Replaces the built-in attribute handlers when `true`. |
+| `shouldReplaceAttributeHandlers()` | `true` replaces built-in handlers; an explicitly overridden `false` can cancel an earlier `true`. |
 | `getDependencyExtensions()` | Additional supported DI v2 keys not represented by the base hooks. Unknown keys and attempts to replace a base section are rejected. |
 
 ```php
@@ -267,7 +267,21 @@ final class AppConfigProvider extends ConfigProvider
 
 Calling a provider returns a config array with a `dependencies` section.
 
-Empty arrays, `null`, and default `false` values are omitted from that section. Values nested inside a section are preserved, so a service whose value is `false` is not removed. The v1 `autowires` and property-resolver sections are not part of the v2 schema; normal concrete classes are autowired by DI v2, while attributes are handled through `getAttributeHandlers()`.
+Empty arrays, `null`, and inherited default `false` replacement flags are omitted from that section. If a provider overrides either replacement hook and explicitly returns `false`, the flag is retained so a later provider can cancel an earlier `true`. Values nested inside a section are preserved, so a service whose value is `false` is not removed. The v1 `autowires` and property-resolver sections are not part of the v2 schema; normal concrete classes are autowired by DI v2, while attributes are handled through `getAttributeHandlers()`.
+
+### Provider Composition
+
+Provider order is significant. Generic application configuration keeps the normal Componenta merge rules, but the root `dependencies` section is composed according to its DI schema:
+
+- `factories`, `aliases`, and `services` are maps keyed by DI id. A later provider replaces the complete value for the same id; array-valued factories or services are not recursively spliced.
+- `parameter_resolvers` is a map keyed by semantic integer priority. Priorities are preserved, and a later resolver at the same priority replaces the earlier one.
+- `invokables` and `attribute_handlers` keep the normal list/keyed-array merge behavior.
+- `delegators` keep the historical Componenta merge behavior. `componenta/config` does not reinterpret version-specific DI callable-array shorthand during composition.
+- `parameter_resolvers_replace` and `attribute_handlers_replace` use the last explicitly supplied boolean value. An inherited base `false` is treated as “not specified”.
+
+When `ConfigKey::OVERRIDE_INDEXES` is encountered, it keeps the historical `array_replace_recursive()` behavior for that subtree. Schema-aware atomic-map composition does not override an explicit merge marker.
+
+Existing configuration cache files are replayed verbatim by `ConfigLoader::loadFromFile()`. After upgrading from 2.0.0, regenerate caches built from multiple providers so previously corrupted priorities or atomic DI values are not reused.
 
 ## Factories And Aliases
 

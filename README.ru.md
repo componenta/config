@@ -214,9 +214,9 @@ $environment->string(path('database.host')); // DATABASE_HOST
 | `getDelegators()` | Delegator-фабрики, где ключом является id декорируемого сервиса. |
 | `getServices()` | Уже созданные экземпляры сервисов. |
 | `getParameterResolvers()` | Пользовательские resolver-ы параметров конструктора или метода, сгруппированные по приоритету. |
-| `shouldReplaceParameterResolvers()` | При значении `true` заменяет стандартную цепочку resolver-ов параметров. |
+| `shouldReplaceParameterResolvers()` | `true` заменяет стандартную цепочку resolver-ов; явно возвращённый переопределённым методом `false` может отменить более ранний `true`. |
 | `getAttributeHandlers()` | Обработчики runtime-атрибутов в порядке регистрации. |
-| `shouldReplaceAttributeHandlers()` | При значении `true` заменяет встроенные обработчики атрибутов. |
+| `shouldReplaceAttributeHandlers()` | `true` заменяет встроенные обработчики; явно возвращённый переопределённым методом `false` может отменить более ранний `true`. |
 | `getDependencyExtensions()` | Дополнительные поддерживаемые ключи DI v2, для которых нет отдельного базового метода. Неизвестные ключи и попытки заменить базовую секцию отклоняются. |
 
 ```php
@@ -249,7 +249,21 @@ final class AppConfigProvider extends ConfigProvider
 
 Вызов провайдера возвращает массив конфигурации с секцией `dependencies`.
 
-Пустые массивы, `null` и стандартные значения `false` не записываются в эту секцию. Вложенные значения сохраняются: например, сервис со значением `false` не будет удалён. Секции v1 `autowires` и resolver-ов свойств в схему v2 не входят. Обычные конкретные классы создаются механизмом автоматического разрешения DI v2, а атрибуты обрабатываются через `getAttributeHandlers()`.
+Пустые массивы, `null` и унаследованные стандартные значения `false` для replace-флагов не записываются в эту секцию. Если provider переопределяет соответствующий hook и явно возвращает `false`, флаг сохраняется, поэтому более поздний provider может отменить ранее установленный `true`. Вложенные значения сохраняются: например, сервис со значением `false` не будет удалён. Секции v1 `autowires` и resolver-ов свойств в схему v2 не входят. Обычные конкретные классы создаются механизмом автоматического разрешения DI v2, а атрибуты обрабатываются через `getAttributeHandlers()`.
+
+### Композиция providers
+
+Порядок providers имеет значение. Обычная конфигурация приложения сохраняет стандартные правила merge Componenta, а корневая секция `dependencies` объединяется с учётом DI-схемы:
+
+- `factories`, `aliases` и `services` — это map по DI id. Более поздний provider полностью заменяет значение того же id; array-valued фабрики и сервисы не склеиваются рекурсивно.
+- `parameter_resolvers` — это map с семантическим integer priority. Приоритеты сохраняются, а resolver с тем же priority из более позднего provider заменяет предыдущий.
+- `invokables` и `attribute_handlers` сохраняют обычную семантику merge списков/keyed arrays.
+- `delegators` сохраняют историческую семантику merge Componenta. `componenta/config` не пытается переинтерпретировать зависящий от версии DI shorthand callable-массивов.
+- `parameter_resolvers_replace` и `attribute_handlers_replace` используют последнее явно переданное boolean-значение. Унаследованный базовый `false` означает «не задано».
+
+Когда встречается `ConfigKey::OVERRIDE_INDEXES`, сохраняется историческая семантика `array_replace_recursive()` для соответствующего поддерева. Schema-aware atomic-map композиция не переопределяет явно заданный merge-marker.
+
+Существующие файлы кеша конфигурации `ConfigLoader::loadFromFile()` воспроизводит без повторного merge. После обновления с 2.0.0 пересоберите кеши, созданные из нескольких providers, чтобы не использовать уже повреждённые priorities или atomic DI values.
 
 ## Фабрики и aliases
 

@@ -43,8 +43,10 @@ final class ConfigLoader
     /**
      * Load configuration from providers.
      *
-     * Aggregates configuration arrays returned by providers using
-     * recursive replacement (later providers override earlier ones).
+     * Aggregates provider output using Componenta merge semantics. Generic
+     * numeric arrays append, while the root `dependencies` section uses
+     * schema-aware DI composition so priorities and opaque service definitions
+     * keep their meaning across providers.
      *
      * Providers must return an array or iterable.
      *
@@ -172,7 +174,8 @@ final class ConfigLoader
     /**
      * Merge configuration data from providers.
      *
-     * Later providers override values from earlier ones.
+     * Provider order is significant and is interpreted by {@see config_merge()}
+     * according to generic and root-DI merge semantics.
      *
      * @param callable[] $providers
      *

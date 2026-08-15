@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Componenta\Config;
 
 use Componenta\Config\Exception\ConfigException;
+use Componenta\Config\Internal\ConfigMerger;
 use Componenta\Config\Internal\TypeConverter;
 use Psr\Container\ContainerInterface;
 
@@ -194,8 +195,10 @@ function env_array(string $key, array|DefaultValue $default = DefaultValue::None
 /**
  * Recursively merges two configuration arrays.
  *
- * String keys: later values replace earlier ones (like array_replace_recursive).
- * Numeric keys: later values are appended (like array_merge).
+ * Generic configuration keeps the historical semantics: string-keyed arrays
+ * merge recursively and numeric keys append. The root `dependencies` section
+ * uses schema-aware DI composition so semantic maps are not treated as lists or
+ * recursively spliced opaque values.
  *
  * If the override array contains ConfigKey::OVERRIDE_INDEXES marker,
  * numeric keys are replaced by index instead of appended.
@@ -204,31 +207,7 @@ function env_array(string $key, array|DefaultValue $default = DefaultValue::None
  */
 function config_merge(array $base, array $override): array
 {
-    if ($override === []) {
-        return $base;
-    }
-
-    if (isset($override[ConfigKey::OVERRIDE_INDEXES])) {
-        unset($override[ConfigKey::OVERRIDE_INDEXES]);
-
-        return array_replace_recursive($base, $override);
-    }
-
-    if ($base === []) {
-        return $override;
-    }
-
-    foreach ($override as $key => $value) {
-        if (is_int($key)) {
-            $base[] = $value;
-        } elseif (is_array($value) && isset($base[$key]) && is_array($base[$key])) {
-            $base[$key] = config_merge($base[$key], $value);
-        } else {
-            $base[$key] = $value;
-        }
-    }
-
-    return $base;
+    return ConfigMerger::merge($base, $override);
 }
 
 /**
