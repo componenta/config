@@ -176,21 +176,11 @@ final class EnvLoaderTest extends TestCase
     // ERROR HANDLING
     // =========================================================================
 
-    public function testLoadReturnsNullWhenNoFilesFoundAndNoGlobals(): void
+    public function testReadReturnsNullWhenNoFilesFound(): void
     {
-        $env = $_ENV;
-        $server = $_SERVER;
         $loader = new EnvLoader(self::FIXTURES . '/empty');
 
-        $_ENV = [];
-        $_SERVER = [];
-
-        try {
-            self::assertNull($loader->load());
-        } finally {
-            $_ENV = $env;
-            $_SERVER = $server;
-        }
+        self::assertNull($loader->read());
     }
 
     public function testLoadThrowsForInvalidVariableName(): void
