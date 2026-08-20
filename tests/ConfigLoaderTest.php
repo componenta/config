@@ -2,193 +2,112 @@
 
 declare(strict_types=1);
 
-namespace Componenta\Config\Tests;
-
 use Componenta\Config\Config;
 use Componenta\Config\ConfigLoader;
+use Componenta\Config\ConfigPath;
 use Componenta\Config\Environment;
 use Componenta\Config\Exception\ConfigException;
-use Componenta\Config\ConfigPath;
-use PHPUnit\Framework\TestCase;
 
-final class ConfigLoaderTest extends TestCase
+function configLoaderRuntime(): string
 {
-    private const string FIXTURES = __DIR__ . '/fixtures';
-    private const string RUNTIME = __DIR__ . '/fixtures/runtime';
-
-    protected function tearDown(): void
-    {
-        $this->cleanRuntime();
-    }
-
-    private function cleanRuntime(): void
-    {
-        $files = glob(self::RUNTIME . '/*');
-
-        if ($files === false) {
-            return;
-        }
-
-        foreach ($files as $file) {
-            if (basename($file) === '.gitkeep') {
-                continue;
-            }
-
-            if (is_dir($file)) {
-                $this->removeDirectory($file);
-            } else {
-                unlink($file);
-            }
-        }
-    }
-
-    private function removeDirectory(string $dir): void
-    {
-        $files = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST,
-        );
-
-        foreach ($files as $file) {
-            $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
-        }
-
-        rmdir($dir);
-    }
-
-    public function testLoadAggregatesProviders(): void
-    {
-        $config = ConfigLoader::load(
-            null,
-            static fn(): array => ['a' => 1, 'b' => 2],
-            static fn(): array => ['c' => 3],
-        );
-
-        self::assertSame(1, $config->get('a'));
-        self::assertSame(2, $config->get('b'));
-        self::assertSame(3, $config->get('c'));
-    }
-
-    public function testLoadMergesProvidersRecursively(): void
-    {
-        $config = ConfigLoader::load(
-            null,
-            static fn(): array => ['database' => ['host' => 'localhost']],
-            static fn(): array => ['database' => ['port' => 3306]],
-        );
-
-        self::assertSame('localhost', $config->get(new ConfigPath('database.host')));
-        self::assertSame(3306, $config->get(new ConfigPath('database.port')));
-    }
-
-    public function testLoadReturnsEmptyConfigWithNoProviders(): void
-    {
-        $config = ConfigLoader::load(null);
-
-        self::assertSame([], $config->toArray());
-    }
-
-    public function testLoadThrowsWhenProviderReturnsNonArray(): void
-    {
-        $this->expectException(ConfigException::class);
-        $this->expectExceptionMessage('Configuration provider must return an array or iterable');
-
-        ConfigLoader::load(null, static fn(): string => 'not-an-array');
-    }
-
-    public function testLoadAcceptsIterableProviders(): void
-    {
-        $config = ConfigLoader::load(
-            null,
-            static fn(): \ArrayIterator => new \ArrayIterator(['a' => 1]),
-        );
-
-        self::assertSame(1, $config->get('a'));
-    }
-
-    public function testLoadKeepsEnvironmentContract(): void
-    {
-        $environment = new Environment(['APP_ENV' => 'testing']);
-
-        $config = ConfigLoader::load($environment, static fn(): array => ['app' => 'test']);
-
-        self::assertSame($environment, $config->environment);
-        self::assertSame('testing', $config->environment->string('APP_ENV'));
-    }
-
-    public function testLoadWithoutEnvironmentHasNullEnvironment(): void
-    {
-        $config = ConfigLoader::load(null);
-
-        self::assertNull($config->environment);
-    }
-
-    public function testLoadFromFileReadsCachedConfig(): void
-    {
-        $config = ConfigLoader::loadFromFile(self::FIXTURES . '/cache/config.cache.php');
-
-        self::assertTrue($config->get('cached'));
-    }
-
-    public function testLoadFromFileIncludesEnvironment(): void
-    {
-        $config = ConfigLoader::loadFromFile(self::FIXTURES . '/cache/config-with-env.cache.php');
-
-        self::assertInstanceOf(Environment::class, $config->environment);
-        self::assertSame('cached', $config->environment->string('APP_ENV'));
-    }
-
-    public function testLoadFromFileCanPopulateEnvironmentGlobals(): void
-    {
-        unset($_ENV['APP_ENV'], $_SERVER['APP_ENV']);
-
-        ConfigLoader::loadFromFile(self::FIXTURES . '/cache/config-with-env.cache.php', populateEnv: true);
-
-        self::assertSame('cached', $_ENV['APP_ENV']);
-        self::assertSame('cached', $_SERVER['APP_ENV']);
-    }
-
-    public function testLoadFromFileThrowsWhenCachePayloadIsInvalid(): void
-    {
-        $cacheFile = self::RUNTIME . '/invalid.cache.php';
-
-        file_put_contents($cacheFile, "<?php\n\ndeclare(strict_types=1);\n\nreturn false;\n");
-
-        $this->expectException(ConfigException::class);
-        $this->expectExceptionMessage('Invalid cache file format');
-
-        ConfigLoader::loadFromFile($cacheFile);
-    }
-
-    public function testExportWritesCacheFile(): void
-    {
-        $cacheFile = self::RUNTIME . '/export.cache.php';
-
-        ConfigLoader::export(new Config(['exported' => true]), $cacheFile);
-
-        self::assertFileExists($cacheFile);
-
-        $cached = include $cacheFile;
-        self::assertSame(['exported' => true], $cached['config']);
-    }
-
-    public function testExportIncludesEnvironment(): void
-    {
-        $cacheFile = self::RUNTIME . '/export-env.cache.php';
-        $environment = new Environment(['APP_ENV' => 'production']);
-
-        ConfigLoader::export(new Config(['app' => 'test'], $environment), $cacheFile);
-
-        $cached = include $cacheFile;
-        self::assertSame(['APP_ENV' => 'production'], $cached['environment']);
-    }
-
-    public function testExportCreatesDirectory(): void
-    {
-        $cacheFile = self::RUNTIME . '/nested/deep/config.cache.php';
-
-        ConfigLoader::export(new Config(['test' => true]), $cacheFile);
-
-        self::assertFileExists($cacheFile);
-    }
+    static $path;
+    return $path ??= sys_get_temp_dir() . '/componenta_config_loader_' . bin2hex(random_bytes(5));
 }
+
+function removeConfigLoaderRuntime(): void
+{
+    $root = configLoaderRuntime();
+    if (!is_dir($root)) { return; }
+
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST,
+    );
+
+    foreach ($iterator as $entry) {
+        $entry->isDir() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
+    }
+
+    rmdir($root);
+}
+
+beforeEach(function (): void { @mkdir(configLoaderRuntime(), 0700, true); });
+afterEach(function (): void { removeConfigLoaderRuntime(); });
+
+it('loads and recursively composes providers', function (): void {
+    $environment = new Environment(['APP_ENV' => 'test']);
+    $config = ConfigLoader::load(
+        $environment,
+        static fn(): array => ['database' => ['host' => 'localhost']],
+        static fn(): array => ['database' => ['port' => 3306]],
+    );
+
+    expect($config->get(new ConfigPath('database.host')))->toBe('localhost')
+        ->and($config->get(new ConfigPath('database.port')))->toBe(3306)
+        ->and($config->environment)->toBe($environment);
+});
+
+it('accepts iterable provider output', function (): void {
+    $config = ConfigLoader::load(
+        null,
+        static fn(): Traversable => new ArrayIterator(['value' => 42]),
+    );
+
+    expect($config->int('value'))->toBe(42);
+});
+
+it('rejects invalid provider output', function (): void {
+    expect(fn() => ConfigLoader::load(null, static fn(): string => 'invalid'))
+        ->toThrow(ConfigException::class, 'array or iterable');
+});
+
+it('exports and reloads an atomic PHP cache snapshot', function (): void {
+    $file = configLoaderRuntime() . '/nested/config.php';
+    $original = new Config(
+        ['app' => ['name' => 'Componenta']],
+        new Environment(['APP_ENV' => 'production']),
+    );
+
+    ConfigLoader::export($original, $file);
+    $loaded = ConfigLoader::loadFromFile($file);
+
+    expect($loaded->toArray())->toBe($original->toArray())
+        ->and($loaded->environment?->toArray())->toBe(['APP_ENV' => 'production']);
+});
+
+it('can replace an existing cache snapshot', function (): void {
+    $file = configLoaderRuntime() . '/replace.php';
+
+    ConfigLoader::export(new Config(['version' => 1]), $file);
+    ConfigLoader::export(new Config(['version' => 2]), $file);
+
+    expect(ConfigLoader::loadFromFile($file)->int('version'))->toBe(2);
+});
+
+it('can populate environment globals from a cache', function (): void {
+    $file = configLoaderRuntime() . '/config.php';
+    unset($_ENV['CONFIG_LOADER_ENV'], $_SERVER['CONFIG_LOADER_ENV']);
+
+    ConfigLoader::export(
+        new Config([], new Environment(['CONFIG_LOADER_ENV' => 'cached'])),
+        $file,
+    );
+
+    ConfigLoader::loadFromFile($file, populateEnv: true);
+
+    expect($_ENV['CONFIG_LOADER_ENV'])->toBe('cached')
+        ->and($_SERVER['CONFIG_LOADER_ENV'])->toBe('cached');
+
+    unset($_ENV['CONFIG_LOADER_ENV'], $_SERVER['CONFIG_LOADER_ENV']);
+});
+
+it('rejects missing and malformed cache files', function (): void {
+    expect(fn() => ConfigLoader::loadFromFile(configLoaderRuntime() . '/missing.php'))
+        ->toThrow(ConfigException::class, 'not readable');
+
+    $invalid = configLoaderRuntime() . '/invalid.php';
+    file_put_contents($invalid, "<?php return ['config' => 'not-an-array'];");
+
+    expect(fn() => ConfigLoader::loadFromFile($invalid))
+        ->toThrow(ConfigException::class, '"config" entry must be an array');
+});

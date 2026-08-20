@@ -2,318 +2,150 @@
 
 declare(strict_types=1);
 
-namespace Componenta\Config\Tests;
-
 use Componenta\Config\ConfigKey;
 use Componenta\Config\ConfigProvider;
-use PHPUnit\Framework\TestCase;
 
-final class ConfigProviderTest extends TestCase
-{
-    public function testInvokeReturnsEmptyDependenciesForBaseProvider(): void
-    {
-        $provider = new ConfigProvider();
+it('returns an empty dependency section for the base provider', function (): void {
+    expect((new ConfigProvider())())->toBe([ConfigKey::DEPENDENCIES => []]);
+});
 
-        $config = $provider();
+it('builds standard dependency sections', function (): void {
+    $provider = new class extends ConfigProvider {
+        protected function getFactories(): array { return ['service' => 'Factory']; }
+        protected function getInvokables(): array { return ['Service', 'alias' => 'AliasedService']; }
+        protected function getAliases(): array { return ['explicit' => 'ExplicitService']; }
+        protected function getDelegators(): array { return ['service' => ['Decorate']]; }
+        protected function getServices(): array { return ['ready' => new stdClass()]; }
+        protected function getParameterResolvers(): array { return [900 => 'Resolver']; }
+        protected function shouldReplaceParameterResolvers(): bool { return true; }
+        protected function getAttributeDefinitions(): array { return ['Definition']; }
+        protected function shouldReplaceAttributeDefinitions(): bool { return true; }
+        protected function getAttributeCapabilities(): array { return ['Capability']; }
+    };
 
-        self::assertSame(['dependencies' => []], $config);
-    }
+    $dependencies = $provider()[ConfigKey::DEPENDENCIES];
 
-    public function testInvokeReturnsFactories(): void
-    {
-        $provider = new class extends ConfigProvider {
-            protected function getFactories(): array
-            {
-                return ['ServiceA' => 'FactoryA'];
-            }
-        };
+    expect($dependencies[ConfigKey::FACTORIES])->toBe(['service' => 'Factory'])
+        ->and($dependencies[ConfigKey::INVOKABLES])->toBe(['Service', 'AliasedService'])
+        ->and($dependencies[ConfigKey::ALIASES])->toBe([
+            'explicit' => 'ExplicitService',
+            'alias' => 'AliasedService',
+        ])
+        ->and($dependencies[ConfigKey::DELEGATORS])->toBe(['service' => ['Decorate']])
+        ->and($dependencies[ConfigKey::PARAMETER_RESOLVERS])->toBe([900 => 'Resolver'])
+        ->and($dependencies[ConfigKey::PARAMETER_RESOLVERS_REPLACE])->toBeTrue()
+        ->and($dependencies[ConfigKey::ATTRIBUTE_DEFINITIONS])->toBe(['Definition'])
+        ->and($dependencies[ConfigKey::ATTRIBUTE_DEFINITIONS_REPLACE])->toBeTrue()
+        ->and($dependencies[ConfigKey::ATTRIBUTE_CAPABILITIES])->toBe(['Capability'])
+        ->and($dependencies[ConfigKey::SERVICES]['ready'])->toBeInstanceOf(stdClass::class);
+});
 
-        $config = $provider();
+it('merges child providers after the parent', function (): void {
+    $provider = new class extends ConfigProvider {
+        protected function getFactories(): array { return ['service' => 'BaseFactory']; }
+        protected function getConfig(): array { return ['app' => ['name' => 'base', 'debug' => false]]; }
+        protected function getProviders(): iterable
+        {
+            return [
+                new class extends ConfigProvider {
+                    protected function getFactories(): array
+                    {
+                        return ['service' => 'ChildFactory', 'other' => 'OtherFactory'];
+                    }
+                    protected function getConfig(): array { return ['app' => ['debug' => true]]; }
+                },
+            ];
+        }
+    };
 
-        self::assertSame(['ServiceA' => 'FactoryA'], $config['dependencies']['factories']);
-    }
+    $config = $provider();
 
-    public function testInvokeReturnsInvokablesAsList(): void
-    {
-        $provider = new class extends ConfigProvider {
-            protected function getInvokables(): array
-            {
-                return ['ServiceA', 'ServiceB'];
-            }
-        };
+    expect($config[ConfigKey::DEPENDENCIES][ConfigKey::FACTORIES])->toBe([
+        'service' => 'ChildFactory',
+        'other' => 'OtherFactory',
+    ])->and($config['app'])->toBe(['name' => 'base', 'debug' => true]);
+});
 
-        $config = $provider();
+it('allows downstream-specific dependency extension keys', function (): void {
+    $provider = new class extends ConfigProvider {
+        protected function getDependencyExtensions(): array
+        {
+            return ['container_specific' => ['enabled' => true]];
+        }
+    };
 
-        self::assertSame(['ServiceA', 'ServiceB'], $config['dependencies']['invokables']);
-    }
+    expect($provider()[ConfigKey::DEPENDENCIES]['container_specific'])
+        ->toBe(['enabled' => true]);
+});
 
-    public function testInvokeExtractsAliasesFromKeyedInvokables(): void
-    {
-        $provider = new class extends ConfigProvider {
-            protected function getInvokables(): array
-            {
-                return [
-                    'SimpleService',
-                    'AliasInterface' => 'ConcreteService',
-                ];
-            }
-        };
+it('rejects dependency extensions that replace standard sections', function (): void {
+    $provider = new class extends ConfigProvider {
+        protected function getDependencyExtensions(): array
+        {
+            return [ConfigKey::FACTORIES => ['service' => 'Factory']];
+        }
+    };
 
-        $config = $provider();
+    expect($provider(...))
+        ->toThrow(InvalidArgumentException::class, 'cannot replace standard key');
+});
 
-        self::assertSame(['SimpleService', 'ConcreteService'], $config['dependencies']['invokables']);
-        self::assertSame(['AliasInterface' => 'ConcreteService'], $config['dependencies']['aliases']);
-    }
+it('rejects conflicting invokable and explicit aliases', function (): void {
+    $provider = new class extends ConfigProvider {
+        protected function getInvokables(): array { return ['service' => 'InvokableService']; }
+        protected function getAliases(): array { return ['service' => 'DifferentService']; }
+    };
 
-    public function testInvokeMergesInvokableAliasesWithExplicitAliases(): void
-    {
-        $provider = new class extends ConfigProvider {
-            protected function getInvokables(): array
-            {
-                return [
-                    'Interface1' => 'Concrete1',
-                ];
-            }
+    expect($provider(...))
+        ->toThrow(InvalidArgumentException::class, 'conflicts with explicit alias');
+});
 
-            protected function getAliases(): array
-            {
-                return [
-                    'Interface2' => 'Concrete2',
-                ];
-            }
-        };
+it('keeps an explicitly overridden false replacement flag', function (): void {
+    $provider = new class extends ConfigProvider {
+        protected function shouldReplaceAttributeDefinitions(): bool { return true; }
+        protected function getProviders(): iterable
+        {
+            return [
+                new class extends ConfigProvider {
+                    protected function shouldReplaceAttributeDefinitions(): bool { return false; }
+                },
+            ];
+        }
+    };
 
-        $config = $provider();
+    expect($provider()[ConfigKey::DEPENDENCIES][ConfigKey::ATTRIBUTE_DEFINITIONS_REPLACE])
+        ->toBeFalse();
+});
 
-        self::assertSame([
-            'Interface2' => 'Concrete2',
-            'Interface1' => 'Concrete1',
-        ], $config['dependencies']['aliases']);
-    }
+it('omits inherited false replacement flags', function (): void {
+    $dependencies = (new ConfigProvider())()[ConfigKey::DEPENDENCIES];
 
-    public function testInvokeReturnsVersionTwoExtensionConfiguration(): void
-    {
-        $provider = new class extends ConfigProvider {
-            protected function getServices(): array
-            {
-                return ['feature.enabled' => false];
-            }
+    expect($dependencies)
+        ->not->toHaveKey(ConfigKey::PARAMETER_RESOLVERS_REPLACE)
+        ->not->toHaveKey(ConfigKey::ATTRIBUTE_DEFINITIONS_REPLACE);
+});
 
-            protected function getParameterResolvers(): array
-            {
-                return [100 => 'ResolverA'];
-            }
+it('rejects non-callable child providers during construction', function (): void {
+    $factory = static fn(): ConfigProvider => new class extends ConfigProvider {
+        protected function getProviders(): iterable { return ['not-callable']; }
+    };
 
-            protected function shouldReplaceParameterResolvers(): bool
-            {
-                return true;
-            }
+    expect($factory)->toThrow(InvalidArgumentException::class, 'must be callable');
+});
 
-            protected function getAttributeHandlers(): array
-            {
-                return ['HandlerA'];
-            }
-
-            protected function shouldReplaceAttributeHandlers(): bool
-            {
-                return true;
-            }
-
-            protected function getDependencyExtensions(): array
-            {
-                return [
-                    ConfigKey::GENERATED_ENTRY_RESOLVER_FILE => 'runtime/container.resolver.php',
-                    ConfigKey::GENERATED_ENTRY_RESOLVER_RELEASE_FINGERPRINT => 'release-42',
-                ];
-            }
-        };
-
-        $config = $provider();
-
-        self::assertSame([
-            ConfigKey::SERVICES => ['feature.enabled' => false],
-            ConfigKey::PARAMETER_RESOLVERS => [100 => 'ResolverA'],
-            ConfigKey::PARAMETER_RESOLVERS_REPLACE => true,
-            ConfigKey::ATTRIBUTE_HANDLERS => ['HandlerA'],
-            ConfigKey::ATTRIBUTE_HANDLERS_REPLACE => true,
-            ConfigKey::GENERATED_ENTRY_RESOLVER_FILE => 'runtime/container.resolver.php',
-            ConfigKey::GENERATED_ENTRY_RESOLVER_RELEASE_FINGERPRINT => 'release-42',
-        ], $config[ConfigKey::DEPENDENCIES]);
-    }
-
-    public function testInvokeReturnsDelegators(): void
-    {
-        $provider = new class extends ConfigProvider {
-            protected function getDelegators(): array
-            {
-                return [
-                    'ServiceA' => ['Delegator1', 'Delegator2'],
-                ];
-            }
-        };
-
-        $config = $provider();
-
-        self::assertSame(
-            ['ServiceA' => ['Delegator1', 'Delegator2']],
-            $config['dependencies']['delegators'],
-        );
-    }
-
-    public function testInvokeReturnsServices(): void
-    {
-        $provider = new class extends ConfigProvider {
-            protected function getServices(): array
-            {
-                return ['config' => ['key' => 'value']];
-            }
-        };
-
-        $config = $provider();
-
-        self::assertSame(['config' => ['key' => 'value']], $config['dependencies']['services']);
-    }
-
-    public function testInvokeReturnsApplicationConfig(): void
-    {
-        $provider = new class extends ConfigProvider {
-            protected function getConfig(): array
-            {
-                return [
-                    'app' => ['name' => 'MyApp'],
-                    'debug' => true,
-                ];
-            }
-        };
-
-        $config = $provider();
-
-        self::assertSame('MyApp', $config['app']['name']);
-        self::assertTrue($config['debug']);
-    }
-
-    public function testInvokeMergesChildProviders(): void
-    {
-        $provider = new ConfigProviderTestParentFixture();
-
-        $config = $provider();
-
-        self::assertArrayHasKey('ParentService', $config['dependencies']['factories']);
-        self::assertArrayHasKey('ChildService', $config['dependencies']['factories']);
-        self::assertSame('config', $config['parent']);
-        self::assertSame('config', $config['child']);
-    }
-
-    public function testInvokeFiltersEmptyArrays(): void
-    {
-        $provider = new class extends ConfigProvider {
-            protected function getFactories(): array
-            {
-                return ['Service' => 'Factory'];
-            }
-        };
-
-        $config = $provider();
-
-        self::assertSame([
-            ConfigKey::FACTORIES => ['Service' => 'Factory'],
-        ], $config[ConfigKey::DEPENDENCIES]);
-    }
-
-    public function testDependencyExtensionsRejectUnknownKeys(): void
-    {
-        $provider = new class extends ConfigProvider {
-            protected function getDependencyExtensions(): array
-            {
-                return ['unknown' => true];
-            }
-        };
-
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Unsupported dependency configuration key "unknown".');
-
-        $provider();
-    }
-
-    public function testDependencyExtensionsCannotReplaceBaseKeys(): void
-    {
-        $provider = new class extends ConfigProvider {
-            protected function getDependencyExtensions(): array
-            {
-                return [ConfigKey::FACTORIES => ['Service' => 'Factory']];
-            }
-        };
-
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Dependency extension cannot replace base key "factories".');
-
-        $provider();
-    }
-
-    public function testVersionTwoSchemaDoesNotExposeLegacyKeys(): void
-    {
-        self::assertSame([
-            ConfigKey::FACTORIES,
-            ConfigKey::INVOKABLES,
-            ConfigKey::ALIASES,
-            ConfigKey::DELEGATORS,
-            ConfigKey::SERVICES,
-            ConfigKey::PARAMETER_RESOLVERS,
-            ConfigKey::PARAMETER_RESOLVERS_REPLACE,
-            ConfigKey::ATTRIBUTE_HANDLERS,
-            ConfigKey::ATTRIBUTE_HANDLERS_REPLACE,
-            ConfigKey::GENERATED_ENTRY_RESOLVER_FILE,
-            ConfigKey::GENERATED_ENTRY_RESOLVER_RELEASE_FINGERPRINT,
-        ], ConfigKey::dependencyKeys());
-
-        self::assertFalse(defined(ConfigKey::class . '::AUTOWIRES'));
-        self::assertFalse(defined(ConfigKey::class . '::PROPERTY_RESOLVERS'));
-        self::assertFalse(defined(ConfigKey::class . '::PROPERTY_RESOLVERS_REPLACE'));
-        self::assertFalse(method_exists(ConfigProvider::class, 'getAutowires'));
-        self::assertFalse(method_exists(ConfigProvider::class, 'getPropertyResolvers'));
-        self::assertTrue(method_exists(ConfigProvider::class, 'getDependencyExtensions'));
-        self::assertTrue((new \ReflectionMethod(ConfigProvider::class, 'getDependencies'))->isFinal());
-    }
-
-}
-
-// =========================================================================
-// FIXTURES
-// =========================================================================
-
-/**
- * @internal
- */
-final class ConfigProviderTestChildFixture extends ConfigProvider
-{
-    protected function getFactories(): array
-    {
-        return ['ChildService' => 'ChildFactory'];
-    }
-
-    protected function getConfig(): array
-    {
-        return ['child' => 'config'];
-    }
-}
-
-/**
- * @internal
- */
-final class ConfigProviderTestParentFixture extends ConfigProvider
-{
-    protected function getProviders(): array
-    {
-        return [new ConfigProviderTestChildFixture()];
-    }
-
-    protected function getFactories(): array
-    {
-        return ['ParentService' => 'ParentFactory'];
-    }
-
-    protected function getConfig(): array
-    {
-        return ['parent' => 'config'];
-    }
-}
+it('exposes only the current dependency schema', function (): void {
+    expect(ConfigKey::dependencyKeys())->toBe([
+        ConfigKey::FACTORIES,
+        ConfigKey::INVOKABLES,
+        ConfigKey::ALIASES,
+        ConfigKey::DELEGATORS,
+        ConfigKey::SERVICES,
+        ConfigKey::PARAMETER_RESOLVERS,
+        ConfigKey::PARAMETER_RESOLVERS_REPLACE,
+        ConfigKey::ATTRIBUTE_DEFINITIONS,
+        ConfigKey::ATTRIBUTE_DEFINITIONS_REPLACE,
+        ConfigKey::ATTRIBUTE_CAPABILITIES,
+    ])->and(defined(ConfigKey::class . '::ATTRIBUTE_HANDLERS'))->toBeFalse()
+        ->and(defined(ConfigKey::class . '::GENERATED_ENTRY_RESOLVER_FILE'))->toBeFalse()
+        ->and(method_exists(ConfigProvider::class, 'getAttributeHandlers'))->toBeFalse();
+});

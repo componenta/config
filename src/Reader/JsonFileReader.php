@@ -5,39 +5,47 @@ declare(strict_types=1);
 namespace Componenta\Config\Reader;
 
 use Componenta\Config\Exception\ConfigException;
+use JsonException;
 
-/**
- * JSON file reader for configuration files.
- *
- * Returns null for non-`.json` paths (signal "not my extension") and for
- * unreadable files. Malformed JSON is reported via {@see ConfigException}
- * so a typo in a config file fails loud rather than silently producing an
- * empty config - null would otherwise conflate three different conditions.
- */
 final class JsonFileReader implements FileReaderInterface
 {
     public function readFile(string $file): ?array
     {
-        if (!str_ends_with($file, '.json')) {
+        if (!str_ends_with(strtolower($file), '.json')) {
             return null;
         }
 
-        $content = @file_get_contents($file);
+        if (!is_file($file) || !is_readable($file)) {
+            throw new ConfigException(sprintf(
+                'JSON configuration file "%s" is not readable.',
+                $file,
+            ));
+        }
 
+        $content = file_get_contents($file);
         if ($content === false) {
-            return null;
+            throw new ConfigException(sprintf(
+                'Failed to read JSON configuration file "%s".',
+                $file,
+            ));
         }
 
         try {
             $data = json_decode($content, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException $e) {
-            throw new ConfigException(sprintf(
-                'Failed to parse JSON config "%s": %s',
-                $file,
-                $e->getMessage(),
-            ), previous: $e);
+        } catch (JsonException $e) {
+            throw new ConfigException(
+                sprintf('Failed to parse JSON configuration file "%s": %s', $file, $e->getMessage()),
+                previous: $e,
+            );
         }
 
-        return is_array($data) ? $data : null;
+        if (!is_array($data)) {
+            throw new ConfigException(sprintf(
+                'JSON configuration file "%s" must contain an object or array at the root.',
+                $file,
+            ));
+        }
+
+        return $data;
     }
 }

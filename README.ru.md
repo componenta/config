@@ -1,8 +1,8 @@
 # Componenta Config
 
-[English](README.md) | **Русский**
+`componenta/config` — библиотека конфигурации для PHP 8.4+. Она предоставляет неизменяемые снимки конфигурации, явные вложенные пути, типизированное чтение, загрузку окружения, файловые провайдеры, детерминированное объединение конфигурации, ленивые значения и генерацию PHP-кеша.
 
-Иммутабельная конфигурация и доступ к окружению для библиотек Componenta.
+Пакет не зависит от фреймворка. Его можно использовать отдельно или как слой конфигурации для DI-контейнера.
 
 ## Установка
 
@@ -10,270 +10,524 @@
 composer require componenta/config
 ```
 
-Пакет намеренно не объявляет автоматический провайдер в `extra.componenta.config-providers`.
-`Componenta\Config\ConfigProvider` — базовый класс для провайдеров пакетов и приложения.
-
-## Требования
-
-- PHP 8.4+
-- `componenta/var-export` для экспорта файлов кеша
-
-## Связанные пакеты
-
-| Пакет | Зачем нужен здесь |
-|---|---|
-| `componenta/var-export` | Экспортирует конфигурацию в PHP-файл кеша. |
-| `componenta/di` | Потребляет секцию `dependencies`, которую возвращают `ConfigProvider` классы. |
-| `componenta/app` | Выбирает, загружать конфиг из провайдеров в разработке или из кеша в продакшене. |
-
-## Что предоставляет пакет
-
-- `Config`: иммутабельный контейнер конфигурации с буквальными ключами и `ConfigPath` ключами.
-- `Environment`: иммутабельный контейнер окружения с типизированными методами чтения.
-- `ConfigLoader`: загрузчик и экспортёр массивов провайдеров и файлов кеша.
-- `ConfigProvider`: базовый класс модульной DI-конфигурации.
-- `FileProvider`: провайдер PHP/JSON файлов с правилами merge в Componenta.
-- `ContainerValue`: PSR-11-совместимая обёртка над контейнером для фабрик конфигурации, с типизированными helper-методами и прямым доступом к `Config`.
-- `ContainerEntry`, `ConfigEntry`, `LazyValue`: явные value objects для typed container lookup, ссылок на другие config-ключи и ленивого вычисления значений.
-
-## Загрузка конфигурации
-
-`ConfigLoader` не решает, работает приложение в разработке или продакшене. Стартовый код сам выбирает, загрузить провайдеры или готовый файл кеша.
+## Быстрый старт
 
 ```php
-use Componenta\Config\ConfigLoader;
-use Componenta\Config\Environment;
-use Componenta\Config\FileProvider;
-
-$environment = new Environment($_ENV);
-
-$config = ConfigLoader::load(
-    $environment,
-    new FileProvider(__DIR__ . '/config/*.php'),
-    static fn(): array => ['app' => ['debug' => false]],
-);
-```
-
-Кеш для продакшена:
-
-```php
-$config = ConfigLoader::loadFromFile(__DIR__ . '/var/cache/config.php', populateEnv: true);
-```
-
-Сборка кеша:
-
-```php
-ConfigLoader::export($config, __DIR__ . '/var/cache/config.php');
-```
-
-Экспортированный файл возвращает:
-
-```php
-[
-    'config' => [...],
-    'environment' => [...],
-]
-```
-
-## Доступ к значениям
-
-Строковые ключи считаются буквальными. `ConfigPath` ключи читают вложенные массивы.
-
-```php
+use Componenta\Config\Config;
 use function Componenta\Config\path;
 
-$config->get('database.host');        // literal key: $data['database.host']
-$config->get(path('database.host'));  // nested key: $data['database']['host']
+$config = new Config([
+    'app' => [
+        'name' => 'Example',
+        'debug' => false,
+    ],
+]);
+
+$name = $config->string(path('app.name'));
+$debug = $config->bool(path('app.debug'));
 ```
 
-Типизированные методы чтения конвертируют значения или бросают исключения:
+Обычная строка всегда означает **буквальный ключ**. Для вложенного доступа используется `ConfigPath`:
+
+```php
+$config = new Config([
+    'database.host' => 'literal-key',
+    'database' => ['host' => 'localhost'],
+]);
+
+$config->get('database.host');       // literal-key
+$config->get(path('database.host')); // localhost
+```
+
+Так ключи с точкой не конфликтуют с синтаксисом вложенных путей.
+
+## Типизированное чтение
 
 ```php
 $host = $config->string(path('database.host'));
 $port = $config->int(path('database.port'), 3306);
-$debug = $config->bool(path('app.debug'), false);
-$tags = $config->array(path('app.tags'), []);
+$ratio = $config->float('ratio', 1.0);
+$enabled = $config->bool('enabled', false);
+$drivers = $config->array('drivers', []);
 ```
 
-Если значение по умолчанию не передано, отсутствующий ключ бросает `ConfigException`. Если значение нельзя привести к запрошенному типу, бросается `InvalidConfigValueException`.
-Default может быть обычным значением, `config_entry(...)` или `lazy(...)`; типизированные методы сначала резолвят default, а затем проверяют итоговый тип.
+Если значение нельзя корректно преобразовать, выбрасывается `InvalidConfigValueException`.
 
-## Типизированный доступ к контейнеру
+`get()` возвращает значение без преобразования. Если ключ обязателен, не передавайте default — при отсутствии будет выброшен `ConfigException`.
 
-`ContainerValue` оборачивает `Psr\Container\ContainerInterface` для фабрик конфигурации. Обёртка сама реализует PSR-11, поэтому старые фабрики с типом `ContainerInterface` продолжают работать, а новые фабрики фреймворка могут типизировать аргумент как `ContainerValue`, если им нужны fallback helpers или конфиг приложения.
+## Пути
 
 ```php
-use Componenta\Config\Config;
 use Componenta\Config\ConfigPath;
-use Componenta\Config\ContainerValue;
-use function Componenta\Config\config_entry;
-use function Componenta\Config\entry;
-use function Componenta\Config\lazy;
-use Psr\Log\LoggerInterface;
+use function Componenta\Config\path;
 
-$config = new Config(['app' => ['name' => 'Componenta']]);
-$services = new ContainerValue($container, $config);
+$path = new ConfigPath('database.connections.primary');
+$path = path('database.connections.primary');
 
-$logger = $services->get(LoggerInterface::class);
-$logger = $services->get(LoggerInterface::class, LoggerInterface::class);
-$auditLogger = $services->find('audit.logger', entry('logger.null', LoggerInterface::class));
-$appName = $services->find('app.name', config_entry(new ConfigPath('app.name'), 'Componenta'));
-$fallbackName = $services->find('fallback.name', lazy(
-    static fn (ContainerValue $container): string => $container->config->string(new ConfigPath('app.name'), 'Componenta'),
-));
-$appName = $services->config->string(new ConfigPath('app.name'), 'Componenta');
+$path->toArray();  // ['database', 'connections', 'primary']
+$path->first();    // database
+$path->last();     // primary
+$path->isNested(); // true
 ```
 
-`get($id)` работает как обычный PSR-11 lookup и возвращает исходную запись. `get($id, $type)` дополнительно проверяет тип найденной записи и бросает `InvalidContainerValueException`, если тип не подходит.
-`find($id, $default)` возвращает существующую запись, если она есть. Если записи нет, метод возвращает default-значение, резолвит `entry(...)` из контейнера, резолвит `config_entry(...)` из `$container->config` или выполняет `lazy(...)` с текущим `ContainerValue`. Обычный callable default возвращается как callable-значение и не выполняется.
+## Defaults и ссылки на другие ключи
 
-Если запись `$id` существует, а default задан через `entry(..., Type::class)`, тип из `entry()` применяется к найденной записи. Это позволяет описывать optional override и одновременно сохранять проверку типа.
+```php
+$timeout = $config->int('timeout', 30);
+```
 
-## Приведение к bool
+Fallback из другого ключа:
 
-Значения true: `true`, `1`, `yes`, `on`, `enabled`, `y`.
+```php
+use function Componenta\Config\config_entry;
+use function Componenta\Config\path;
 
-Значения false: `false`, `0`, `no`, `off`, `disabled`, `n`, пустая строка.
+$name = $config->string(
+    'display_name',
+    config_entry(path('app.name')),
+);
+```
 
-Неоднозначные значения вроде `42`, `-1`, массивов, `null` или неизвестных строк не приводятся к bool молча.
+## Ленивые значения
 
-## Lazy-значения
+Обычный callable хранится как значение и автоматически не выполняется.
 
-Обычные callable-значения в конфигурации считаются данными и не выполняются `Config`. Для вычисляемых значений используйте `lazy(...)`. Lazy-значения получают текущий экземпляр `Config` и по умолчанию кешируются после первого вызова. Используйте `lazy($callback, cache: false)`, если значение нужно пересчитывать при каждом чтении.
-
-Callable defaults также являются значениями: они возвращаются как callable и не выполняются. Используйте `config_entry(...)`, когда отсутствующий ключ должен ссылаться на другой ключ конфигурации.
+Явное ленивое вычисление:
 
 ```php
 use Componenta\Config\Config;
-use Componenta\Config\ConfigLoader;
-use function Componenta\Config\path;
 use function Componenta\Config\lazy;
 
-$config = ConfigLoader::load(null, static fn(): array => [
-    'database' => [
-        'host' => 'localhost',
-        'dsn' => lazy(static fn(Config $config): string => sprintf(
-            'mysql:host=%s',
-            $config->string(path('database.host')),
-        )),
-    ],
+$config = new Config([
+    'host' => 'localhost',
+    'dsn' => lazy(
+        static fn (Config $config): string =>
+            'mysql:host=' . $config->string('host'),
+    ),
 ]);
 
-$dsn = $config->string(path('database.dsn'));
+$dsn = $config->string('dsn');
 ```
 
-Обычные callable возвращаются без выполнения:
+Результат кешируется **отдельно для каждого `Config` или `ContainerValue`**. Один wrapper можно безопасно использовать в нескольких снимках конфигурации.
+
+Отключение кеша:
 
 ```php
-$callable = static fn(): string => 'raw';
-$config = new Config(['callback' => $callable]);
-
-$raw = $config->get('callback'); // тот же callable
+$value = lazy(
+    static fn (): int => random_int(1, 100),
+    cache: false,
+);
 ```
 
-Отключить кеширование lazy-значения можно явно:
+## Фильтрация
+
+`Config` неизменяем. `only()` и `except()` возвращают новый объект:
 
 ```php
-$fresh = lazy(static fn(Config $config): string => uniqid('', true), cache: false);
+$public = $config->only([
+    'app',
+    path('database.host'),
+]);
+
+$withoutSecrets = $config->except([
+    path('database.password'),
+]);
 ```
 
-## Environment
+Исходный объект не изменяется. `Config` также реализует `Countable`, `IteratorAggregate`, read-only `ArrayAccess` и `Componenta\Arrayable\Arrayable`.
 
-`EnvLoader` загружает `.env*` файлы из одной или нескольких директорий и возвращает `?Environment`.
+## Переменные окружения
+
+### Environment
+
+```php
+use Componenta\Config\Environment;
+
+$environment = new Environment([
+    'APP_ENV' => 'production',
+    'APP_DEBUG' => 'false',
+]);
+
+$mode = $environment->string('APP_ENV');
+$debug = $environment->bool('APP_DEBUG');
+```
+
+Снимок текущего окружения:
+
+```php
+$environment = Environment::fromGlobals();
+```
+
+Приоритет:
+
+```text
+process environment < $_SERVER < $_ENV
+```
+
+`ConfigPath` преобразуется в `UPPER_SNAKE_CASE`:
+
+```php
+$environment->string(path('database.host')); // DATABASE_HOST
+```
+
+### Загрузка `.env`
+
+По умолчанию `EnvLoader` читает `.env`, затем `.env.local`:
 
 ```php
 use Componenta\Config\Loader\EnvLoader;
 
-$environment = (new EnvLoader(__DIR__))->load(
-    override: false,
-    populateServer: true,
+$environment = (new EnvLoader('.'))->load();
+```
+
+`.env.local` перекрывает `.env`. Значения окружения развертывания имеют приоритет, пока override не включен явно:
+
+```php
+$environment = (new EnvLoader('.'))->load(override: true);
+```
+
+`.env.example`, backup-файлы и другие `.env*` автоматически не загружаются. Другие имена задаются явно:
+
+```php
+$loader = new EnvLoader(
+    '.',
+    filenames: ['.env', '.env.production'],
 );
 ```
 
-Если `.env*` файлы не найдены и глобальные массивы недоступны, `load()` возвращает `null`.
-
-Ключи окружения могут быть строками или объектами `ConfigPath`. Пути приводятся к `UPPER_SNAKE_CASE`:
+Обязательные переменные:
 
 ```php
-$environment->string('APP_ENV', 'production');
-$environment->string(path('database.host')); // DATABASE_HOST
+$loader = new EnvLoader(
+    '.',
+    required: ['APP_KEY', 'DATABASE_URL'],
+);
 ```
 
-## ConfigProvider
+Они могут находиться как в файлах, так и в окружении развертывания.
 
-Модули расширяют `ConfigProvider`, чтобы регистрировать DI-метаданные и конфигурацию модуля.
-Базовый провайдер собирает итоговый массив из переопределяемых секций:
+`read()` только разбирает файлы и не изменяет `$_ENV`/`$_SERVER`.
 
-| Метод | Секция |
-|---|---|
-| `getProviders()` | Дочерние провайдеры, которые merge-ятся после текущего провайдера. |
-| `getConfig()` | Конфигурация приложения или пакета вне `dependencies`. |
-| `getFactories()` | Фабрики сервисов, где ключом является id сервиса. |
-| `getInvokables()` | Классы для прямого создания; keyed-записи также создают aliases. |
-| `getAliases()` | Явные aliases сервисов. |
-| `getDelegators()` | Delegator-фабрики, где ключом является id декорируемого сервиса. |
-| `getServices()` | Уже созданные экземпляры сервисов. |
-| `getParameterResolvers()` | Пользовательские resolver-ы параметров конструктора или метода, сгруппированные по приоритету. |
-| `shouldReplaceParameterResolvers()` | `true` заменяет стандартную цепочку resolver-ов; явно возвращённый переопределённым методом `false` может отменить более ранний `true`. |
-| `getAttributeHandlers()` | Обработчики runtime-атрибутов в порядке регистрации. |
-| `shouldReplaceAttributeHandlers()` | `true` заменяет встроенные обработчики; явно возвращённый переопределённым методом `false` может отменить более ранний `true`. |
-| `getDependencyExtensions()` | Дополнительные поддерживаемые ключи DI v2, для которых нет отдельного базового метода. Неизвестные ключи и попытки заменить базовую секцию отклоняются. |
+### Функции окружения
+
+```php
+use function Componenta\Config\env;
+use function Componenta\Config\env_array;
+use function Componenta\Config\env_bool;
+use function Componenta\Config\env_float;
+use function Componenta\Config\env_int;
+use function Componenta\Config\env_string;
+
+$name = env_string('APP_NAME', 'Example');
+$port = env_int('PORT', 8080);
+$debug = env_bool('APP_DEBUG', false);
+$ratio = env_float('RATIO', 1.0);
+$hosts = env_array('HOSTS', []);
+$value = env('CUSTOM_VALUE');
+```
+
+Типизированные функции не выполняют небезопасное молчаливое преобразование.
+
+## Конфигурация из файлов
+
+`FileProvider` по умолчанию поддерживает PHP и JSON:
+
+```php
+use Componenta\Config\FileProvider;
+
+$provider = new FileProvider('config/*.{php,json}');
+$data = $provider();
+```
+
+Файлы сортируются по пути и объединяются последовательно.
+
+PHP-файл обязан возвращать массив:
+
+```php
+<?php
+
+return [
+    'app' => [
+        'name' => 'Example',
+    ],
+];
+```
+
+Корень JSON должен быть object или array.
+
+Любой файл, попавший под pattern, считается конфигурацией. Нечитаемый или поврежденный файл, неподдерживаемое расширение и неправильный root приводят к `ConfigException`, а не игнорируются.
+
+### Свой reader
+
+```php
+use Componenta\Config\Reader\FileReaderInterface;
+
+final class IniReader implements FileReaderInterface
+{
+    public function readFile(string $file): ?array
+    {
+        if (!str_ends_with($file, '.ini')) {
+            return null;
+        }
+
+        $data = parse_ini_file($file, true);
+
+        if ($data === false) {
+            throw new RuntimeException('Invalid INI configuration.');
+        }
+
+        return $data;
+    }
+}
+```
+
+`null` означает только «reader не поддерживает этот формат». Если расширение поддерживается, ошибка чтения или разбора должна завершаться исключением.
+
+```php
+$provider = new FileProvider(
+    'config/*.ini',
+    readers: [new IniReader()],
+);
+```
+
+## Объединение providers
+
+```php
+use Componenta\Config\ConfigLoader;
+
+$config = ConfigLoader::load(
+    $environment,
+    static fn (): array => require 'config/app.php',
+    static fn (): array => require 'config/local.php',
+);
+```
+
+Более поздний provider перекрывает scalar/map значения. Обычные numeric arrays добавляются в конец.
+
+```php
+use function Componenta\Config\config_merge;
+
+$merged = config_merge(
+    ['middleware' => ['auth']],
+    ['middleware' => ['csrf']],
+);
+
+// ['middleware' => ['auth', 'csrf']]
+```
+
+## ConfigProvider для пакетов
+
+`ConfigProvider` публикует настройки приложения и metadata для DI-контейнера:
 
 ```php
 use Componenta\Config\ConfigProvider;
 
-final class AppConfigProvider extends ConfigProvider
+final class PackageConfigProvider extends ConfigProvider
 {
+    protected function getConfig(): array
+    {
+        return [
+            'feature' => ['enabled' => true],
+        ];
+    }
+
     protected function getFactories(): array
     {
         return [
-            LoggerInterface::class => LoggerFactory::class,
+            ServiceInterface::class => ServiceFactory::class,
         ];
     }
 
     protected function getAliases(): array
     {
         return [
-            CacheInterface::class => RedisCache::class,
-        ];
-    }
-
-    protected function getConfig(): array
-    {
-        return [
-            'app' => ['name' => 'Ophire'],
+            LoggerInterface::class => AppLogger::class,
         ];
     }
 }
 ```
 
-Вызов провайдера возвращает массив конфигурации с секцией `dependencies`.
+Доступные hooks:
 
-Пустые массивы, `null` и унаследованные стандартные значения `false` для replace-флагов не записываются в эту секцию. Если provider переопределяет соответствующий hook и явно возвращает `false`, флаг сохраняется, поэтому более поздний provider может отменить ранее установленный `true`. Вложенные значения сохраняются: например, сервис со значением `false` не будет удалён. Секции v1 `autowires` и resolver-ов свойств в схему v2 не входят. Обычные конкретные классы создаются механизмом автоматического разрешения DI v2, а атрибуты обрабатываются через `getAttributeHandlers()`.
+```text
+getFactories()
+getInvokables()
+getAliases()
+getDelegators()
+getServices()
+getParameterResolvers()
+shouldReplaceParameterResolvers()
+getAttributeDefinitions()
+shouldReplaceAttributeDefinitions()
+getAttributeCapabilities()
+getDependencyExtensions()
+```
 
-### Композиция providers
-
-Порядок providers имеет значение. Обычная конфигурация приложения сохраняет стандартные правила merge Componenta, а корневая секция `dependencies` объединяется с учётом DI-схемы:
-
-- `factories`, `aliases` и `services` — это map по DI id. Более поздний provider полностью заменяет значение того же id; array-valued фабрики и сервисы не склеиваются рекурсивно.
-- `parameter_resolvers` — это map с семантическим integer priority. Приоритеты сохраняются, а resolver с тем же priority из более позднего provider заменяет предыдущий.
-- `invokables` и `attribute_handlers` сохраняют обычную семантику merge списков/keyed arrays.
-- `delegators` сохраняют историческую семантику merge Componenta. `componenta/config` не пытается переинтерпретировать зависящий от версии DI shorthand callable-массивов.
-- `parameter_resolvers_replace` и `attribute_handlers_replace` используют последнее явно переданное boolean-значение. Унаследованный базовый `false` означает «не задано».
-
-Когда встречается `ConfigKey::OVERRIDE_INDEXES`, сохраняется историческая семантика `array_replace_recursive()` для соответствующего поддерева. Schema-aware atomic-map композиция не переопределяет явно заданный merge-marker.
-
-Существующие файлы кеша конфигурации `ConfigLoader::loadFromFile()` воспроизводит без повторного merge. После обновления с 2.0.0 пересоберите кеши, созданные из нескольких providers, чтобы не использовать уже повреждённые priorities или atomic DI values.
-
-## Фабрики и aliases
-
-Нельзя регистрировать фабрику или invokable под id, который одновременно является alias. DI сначала разрешает alias, поэтому определение под исходным id окажется недостижимым. Альтернативные реализации нужно регистрировать непосредственно под одним interface id; нужную реализацию выбирает порядок провайдеров:
+Дочерние providers:
 
 ```php
-protected function getFactories(): array
+protected function getProviders(): iterable
 {
-    return [ServiceInterface::class => ServiceFactory::class];
+    return [
+        new DatabaseConfigProvider(),
+        new CacheConfigProvider(),
+    ];
 }
 ```
 
-Delegator нужен, когда пакет добавляет поведение поверх уже выбранной реализации. Более поздняя фабрика выбирает другую реализацию, но не отключает delegator-ы, зарегистрированные для запрошенного id.
+### Свои parameter resolvers
+
+Ключ массива — priority и сохраняется при объединении:
+
+```php
+protected function getParameterResolvers(): array
+{
+    return [
+        900 => RequestResolver::class,
+        500 => TenantResolver::class,
+    ];
+}
+```
+
+При совпадении priority более поздний resolver заменяет предыдущий целиком.
+
+Полная замена стандартной цепочки:
+
+```php
+protected function shouldReplaceParameterResolvers(): bool
+{
+    return true;
+}
+```
+
+### Attribute definitions и capabilities
+
+```php
+protected function getAttributeDefinitions(): array
+{
+    return [
+        new AttributeDefinition(
+            attribute: FromTenant::class,
+            handler: new FromTenantHandler(),
+        ),
+    ];
+}
+
+protected function getAttributeCapabilities(): array
+{
+    return [
+        new CapabilityPolicy(ValueProvider::class, maxPerTarget: 1),
+    ];
+}
+```
+
+Полная замена встроенных definitions:
+
+```php
+protected function shouldReplaceAttributeDefinitions(): bool
+{
+    return true;
+}
+```
+
+Конкретные `AttributeDefinition`, `CapabilityPolicy` и handlers принадлежат контейнеру. `componenta/config` только передает и корректно объединяет значения.
+
+### Container-specific extensions
+
+```php
+protected function getDependencyExtensions(): array
+{
+    return [
+        'container_specific_option' => [
+            'enabled' => true,
+        ],
+    ];
+}
+```
+
+Extension не может заменить стандартную секцию. Проверку специальных ключей выполняет потребитель.
+
+## Merge semantics для dependencies
+
+- `factories`, `aliases`, `services`, `parameter_resolvers` — identity maps; совпавший id/priority заменяется атомарно.
+- `invokables`, `attribute_definitions`, `attribute_capabilities` — списки; элементы добавляются в порядке providers.
+- delegators одного сервиса добавляются в порядке providers.
+- replace-флаги — scalar; выигрывает более поздний provider.
+- остальная конфигурация объединяется обычным рекурсивным алгоритмом.
+
+Так resolver priorities не переиндексируются, а factory/service definitions не склеиваются как вложенные массивы.
+
+## PHP-кеш
+
+Экспорт:
+
+```php
+use Componenta\Config\ConfigLoader;
+
+ConfigLoader::export(
+    $config,
+    'var/cache/config.php',
+);
+```
+
+Загрузка:
+
+```php
+$config = ConfigLoader::loadFromFile(
+    'var/cache/config.php',
+    populateEnv: true,
+);
+```
+
+Кеш сначала полностью записывается во временный файл и только затем активируется через `rename()`, поэтому читатель не получает частично записанный PHP.
+
+Данные должны поддерживаться `componenta/var-export`. Runtime-only объекты, например closures, перед постоянным кешированием нужно вычислить или исключить.
+
+## ContainerValue
+
+```php
+use Componenta\Config\ContainerValue;
+
+$value = new ContainerValue($container, $config);
+
+$service = $value->get(ServiceInterface::class);
+$optional = $value->find('optional.service', default: null);
+```
+
+Fallback на другой container entry:
+
+```php
+use function Componenta\Config\entry;
+
+$clock = $value->find(
+    'clock',
+    entry('fallback.clock', ClockInterface::class),
+);
+```
+
+Fallback на конфигурацию:
+
+```php
+use function Componenta\Config\config_entry;
+use function Componenta\Config\path;
+
+$name = $value->find(
+    'display_name',
+    config_entry(path('app.name')),
+);
+```
+
+## Ошибки
+
+Общая граница — `Componenta\Config\Exception\ConfigExceptionInterface`.
+
+- `ConfigException` — отсутствующий ключ, неверный provider, ошибки файлов и кеша.
+- `InvalidConfigValueException` — невозможно выполнить типизированное преобразование.
+- `InvalidContainerValueException` — container entry не соответствует ожидаемому типу.
+- `EnvLoaderException` — ошибка dotenv или отсутствует required variable.
+
+## Требования
+
+- PHP 8.4+
+- PSR-11 для container helpers

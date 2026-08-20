@@ -7,8 +7,12 @@ namespace Componenta\Config\Internal;
 use Componenta\Config\ConfigKey;
 
 /**
- * Applies the historical generic configuration merge contract plus the
- * unambiguous map semantics required by the root DI `dependencies` section.
+ * Deterministic configuration composition.
+ *
+ * Generic arrays merge recursively by string key and append numeric entries.
+ * The root dependency section additionally treats maps whose keys carry
+ * semantic identity as atomic maps, so later providers replace one entry
+ * without recursively merging its value.
  *
  * @internal
  */
@@ -29,16 +33,6 @@ final class ConfigMerger
 
     private static function mergeArray(array $base, array $override, bool $root = false): array
     {
-        if ($override === []) {
-            return $base;
-        }
-
-        if (isset($override[ConfigKey::OVERRIDE_INDEXES])) {
-            unset($override[ConfigKey::OVERRIDE_INDEXES]);
-
-            return array_replace_recursive($base, $override);
-        }
-
         if ($base === []) {
             return $override;
         }
@@ -67,16 +61,6 @@ final class ConfigMerger
 
     private static function mergeDependencies(array $base, array $override): array
     {
-        if ($override === []) {
-            return $base;
-        }
-
-        if (isset($override[ConfigKey::OVERRIDE_INDEXES])) {
-            unset($override[ConfigKey::OVERRIDE_INDEXES]);
-
-            return array_replace_recursive($base, $override);
-        }
-
         if ($base === []) {
             return $override;
         }
@@ -95,9 +79,7 @@ final class ConfigMerger
                 continue;
             }
 
-            if (isset(self::ATOMIC_DEPENDENCY_MAPS[$key])
-                && !isset($value[ConfigKey::OVERRIDE_INDEXES])
-            ) {
+            if (isset(self::ATOMIC_DEPENDENCY_MAPS[$key])) {
                 $base[$key] = array_replace($base[$key], $value);
                 continue;
             }

@@ -11,31 +11,42 @@ permissions:
 jobs:
   verify:
     if: startsWith(github.event.head_commit.message, 'Release v')
-    runs-on: ubuntu-latest
+    name: Verify PHP ${{ matrix.php }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.4', '8.5']
+        include:
+          - php: '8.4'
+            os: ubuntu-latest
+          - php: '8.5'
+            os: ubuntu-latest
+          - php: '8.4'
+            os: windows-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: shivammathur/setup-php@v2
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
           php-version: ${{ matrix.php }}
           coverage: none
           tools: composer:v2
-      - run: composer validate --strict
-      - run: composer install --no-interaction --prefer-dist
-      - name: Run package tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          if php -r '$c=json_decode(file_get_contents("composer.json"), true, 512, JSON_THROW_ON_ERROR); exit(isset($c["scripts"]["test"]) ? 0 : 1);'; then
-            composer test
-          elif [ -x vendor/bin/pest ]; then
-            vendor/bin/pest
-          elif [ -x vendor/bin/phpunit ]; then
-            vendor/bin/phpunit
-          fi
+
+      - name: Validate Composer metadata
+        run: composer validate --strict
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Audit dependencies
+        if: matrix.os == 'ubuntu-latest' && matrix.php == '8.4'
+        run: composer audit --no-interaction
+
+      - name: Run checks
+        run: composer check
 
   publish:
     if: startsWith(github.event.head_commit.message, 'Release v')
@@ -43,8 +54,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
       - name: Publish GitHub release
         shell: bash
         env:
@@ -54,12 +68,18 @@ jobs:
           set -euo pipefail
           first_line="${COMMIT_MESSAGE%%$'\n'*}"
           tag="${first_line#Release }"
+
           if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
             echo "Invalid release tag: $tag" >&2
             exit 1
           fi
+
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "Release $tag already exists."
             exit 0
           fi
-          gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --generate-notes
+
+          gh release create "$tag" \
+            --target "$GITHUB_SHA" \
+            --title "$tag" \
+            --generate-notes

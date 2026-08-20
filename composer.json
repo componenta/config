@@ -1,6 +1,6 @@
 {
     "name": "componenta/config",
-    "description": "Immutable configuration container with dot notation, callable support, and caching",
+    "description": "Composable configuration, environment loading, typed access and cache generation for PHP 8.4+",
     "type": "library",
     "license": "MIT",
     "keywords": [
@@ -8,16 +8,29 @@
         "configuration",
         "dotenv",
         "environment",
-        "settings"
+        "settings",
+        "dependency-injection"
     ],
+    "authors": [
+        {
+            "name": "Componenta"
+        }
+    ],
+    "homepage": "https://github.com/componenta/config",
+    "support": {
+        "issues": "https://github.com/componenta/config/issues",
+        "source": "https://github.com/componenta/config"
+    },
     "require": {
-        "php": ">=8.4",
+        "php": "^8.4",
         "componenta/arrayable": "^1.0",
-        "psr/container": "^2.0",
-        "componenta/var-export": "^1.0"
+        "componenta/var-export": "^1.0",
+        "psr/container": "^2.0"
     },
     "require-dev": {
-        "pestphp/pest": "^4.0"
+        "friendsofphp/php-cs-fixer": "^3.0",
+        "pestphp/pest": "^4.0",
+        "phpstan/phpstan": "^2.1"
     },
     "autoload": {
         "psr-4": {
@@ -32,11 +45,30 @@
             "Componenta\\Config\\Tests\\": "tests/"
         }
     },
+    "scripts": {
+        "test": "pest",
+        "phpstan": "phpstan analyse src --level=max",
+        "cs-check": "php-cs-fixer fix --dry-run --diff",
+        "cs-fix": "php-cs-fixer fix",
+        "check": [
+            "@cs-check",
+            "@phpstan",
+            "@test"
+        ]
+    },
     "config": {
         "allow-plugins": {
             "pestphp/pest-plugin": true
         },
-        "sort-packages": true
+        "sort-packages": true,
+        "preferred-install": "dist",
+        "optimize-autoloader": true
     },
-    "minimum-stability": "stable"
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "extra": {
+        "branch-alias": {
+            "dev-main": "3.x-dev"
+        }
+    }
 }

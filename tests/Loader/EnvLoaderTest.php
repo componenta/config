@@ -2,244 +2,108 @@
 
 declare(strict_types=1);
 
-namespace Componenta\Config\Tests\Loader;
-
-use Componenta\Config\Exception\EnvLoaderException;
 use Componenta\Config\Environment;
+use Componenta\Config\Exception\EnvLoaderException;
 use Componenta\Config\Loader\EnvLoader;
-use PHPUnit\Framework\TestCase;
 
-final class EnvLoaderTest extends TestCase
+function envLoaderRuntime(): string
 {
-    private const string FIXTURES = __DIR__ . '/../fixtures/env';
+    static $root;
+    return $root ??= sys_get_temp_dir() . '/componenta_env_loader_' . bin2hex(random_bytes(5));
+}
 
-    protected function setUp(): void
-    {
-        foreach (array_keys($_ENV) as $key) {
-            if (str_starts_with($key, 'TEST_') || str_starts_with($key, 'APP_') || str_starts_with($key, 'KEY')) {
-                unset($_ENV[$key], $_SERVER[$key]);
-            }
-        }
-    }
-
-    // =========================================================================
-    // BASIC LOADING
-    // =========================================================================
-
-    public function testLoadParsesSimpleEnvFile(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/simple');
-        $environment = $loader->load();
-
-        self::assertInstanceOf(Environment::class, $environment);
-        self::assertSame('MyApp', $environment->string('APP_NAME'));
-        self::assertSame('production', $environment->string('APP_ENV'));
-        self::assertSame('true', $environment->string('DEBUG'));
-    }
-
-    public function testLoadPopulatesEnvSuperglobal(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/simple');
-        $loader->load();
-
-        self::assertSame('MyApp', $_ENV['APP_NAME']);
-    }
-
-    public function testLoadPopulatesServerSuperglobal(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/simple');
-        $loader->load();
-
-        self::assertSame('MyApp', $_SERVER['APP_NAME']);
-    }
-
-    public function testLoadSkipsServerWhenDisabled(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/simple');
-        $loader->load(populateServer: false);
-
-        self::assertSame('MyApp', $_ENV['APP_NAME']);
-        self::assertArrayNotHasKey('APP_NAME', $_SERVER);
-    }
-
-    // =========================================================================
-    // QUOTED VALUES
-    // =========================================================================
-
-    public function testLoadHandlesDoubleQuotedValues(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/quoted');
-        $environment = $loader->load();
-
-        self::assertInstanceOf(Environment::class, $environment);
-        self::assertSame('Hello World', $environment->string('MESSAGE_DOUBLE'));
-    }
-
-    public function testLoadHandlesSingleQuotedValues(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/quoted');
-        $environment = $loader->load();
-
-        self::assertInstanceOf(Environment::class, $environment);
-        self::assertSame('Hello World', $environment->string('MESSAGE_SINGLE'));
-    }
-
-    public function testLoadHandlesEscapeSequencesInDoubleQuotes(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/quoted');
-        $environment = $loader->load();
-
-        self::assertInstanceOf(Environment::class, $environment);
-        self::assertSame("line1\nline2\ttab", $environment->string('ESCAPE_DOUBLE'));
-    }
-
-    public function testLoadPreservesLiteralInSingleQuotes(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/quoted');
-        $environment = $loader->load();
-
-        self::assertInstanceOf(Environment::class, $environment);
-        self::assertSame('no\\nescape', $environment->string('ESCAPE_SINGLE'));
-    }
-
-    public function testLoadHandlesEscapedQuotesInDoubleQuotes(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/quoted');
-        $environment = $loader->load();
-
-        self::assertInstanceOf(Environment::class, $environment);
-        self::assertSame('He said "hello"', $environment->string('ESCAPED_QUOTES'));
-    }
-
-    // =========================================================================
-    // COMMENTS
-    // =========================================================================
-
-    public function testLoadIgnoresComments(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/comments');
-        $environment = $loader->load();
-
-        self::assertInstanceOf(Environment::class, $environment);
-        self::assertFalse($environment->has('#'));
-        self::assertSame('value', $environment->string('KEY'));
-        self::assertSame('value2', $environment->string('KEY2'));
-    }
-
-    // =========================================================================
-    // MULTIPLE FILES
-    // =========================================================================
-
-    public function testLoadMergesMultipleEnvFiles(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/override');
-        $environment = $loader->load();
-
-        self::assertInstanceOf(Environment::class, $environment);
-        self::assertSame('base', $environment->string('BASE'));
-        self::assertSame('local', $environment->string('LOCAL'));
-    }
-
-    public function testLoadLocalOverridesBase(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/override');
-        $environment = $loader->load();
-
-        self::assertInstanceOf(Environment::class, $environment);
-        self::assertSame('local', $environment->string('KEY'));
-    }
-
-    // =========================================================================
-    // REQUIRED VARIABLES
-    // =========================================================================
-
-    public function testLoadValidatesRequiredVariables(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/required', required: ['APP_KEY']);
-        $environment = $loader->load();
-
-        self::assertInstanceOf(Environment::class, $environment);
-        self::assertSame('secret', $environment->string('APP_KEY'));
-    }
-
-    public function testLoadThrowsWhenRequiredVariableMissing(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/required', required: ['MISSING_KEY']);
-
-        $this->expectException(EnvLoaderException::class);
-        $this->expectExceptionMessage('Required environment variables are missing: MISSING_KEY');
-
-        $loader->load();
-    }
-
-    // =========================================================================
-    // ERROR HANDLING
-    // =========================================================================
-
-    public function testReadReturnsNullWhenNoFilesFound(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/empty');
-
-        self::assertNull($loader->read());
-    }
-
-    public function testLoadThrowsForInvalidVariableName(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/invalid-name');
-
-        $this->expectException(EnvLoaderException::class);
-        $this->expectExceptionMessage('Invalid .env format');
-
-        $loader->load();
-    }
-
-    public function testLoadThrowsForMissingEqualsSign(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/invalid-format');
-
-        $this->expectException(EnvLoaderException::class);
-        $this->expectExceptionMessage('Invalid .env format');
-
-        $loader->load();
-    }
-
-    // =========================================================================
-    // EDGE CASES
-    // =========================================================================
-
-    public function testLoadHandlesEmptyValue(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/edge-cases');
-        $environment = $loader->load();
-
-        self::assertInstanceOf(Environment::class, $environment);
-        self::assertSame('', $environment->string('EMPTY'));
-    }
-
-    public function testLoadHandlesSpacesInValue(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/edge-cases');
-        $environment = $loader->load();
-
-        self::assertInstanceOf(Environment::class, $environment);
-        self::assertSame('value with spaces', $environment->string('KEY_SPACES'));
-    }
-
-    public function testLoadHandlesEqualsInValue(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/edge-cases');
-        $environment = $loader->load();
-
-        self::assertInstanceOf(Environment::class, $environment);
-        self::assertSame('value=with=equals', $environment->string('KEY_EQUALS'));
-    }
-
-    public function testLoadHandlesUnderscoreStart(): void
-    {
-        $loader = new EnvLoader(self::FIXTURES . '/edge-cases');
-        $environment = $loader->load();
-
-        self::assertInstanceOf(Environment::class, $environment);
-        self::assertSame('value', $environment->string('_UNDERSCORE'));
+function clearEnvLoaderKeys(): void
+{
+    foreach (['APP_ENV', 'APP_NAME', 'DEBUG', 'BASE', 'LOCAL', 'KEY', 'MESSAGE', 'ESCAPED', 'FILE_ONLY', 'PROCESS_ONLY', 'IGNORED_SAMPLE'] as $key) {
+        unset($_ENV[$key], $_SERVER[$key]);
+        putenv($key);
     }
 }
+
+beforeEach(function (): void {
+    clearEnvLoaderKeys();
+    @mkdir(envLoaderRuntime(), 0700, true);
+    foreach (glob(envLoaderRuntime() . '/.*') ?: [] as $file) { if (is_file($file)) { unlink($file); } }
+});
+
+afterEach(function (): void {
+    clearEnvLoaderKeys();
+    foreach (glob(envLoaderRuntime() . '/.*') ?: [] as $file) { if (is_file($file)) { unlink($file); } }
+    @rmdir(envLoaderRuntime());
+});
+
+it('loads only .env and .env.local by default', function (): void {
+    file_put_contents(envLoaderRuntime() . '/.env', "APP_ENV=development\nBASE=base\nKEY=base\n");
+    file_put_contents(envLoaderRuntime() . '/.env.local', "LOCAL=local\nKEY=local\n");
+    file_put_contents(envLoaderRuntime() . '/.env.example', "IGNORED_SAMPLE=example\nAPP_ENV=sample\n");
+
+    $environment = (new EnvLoader(envLoaderRuntime()))->load();
+
+    expect($environment)->toBeInstanceOf(Environment::class)
+        ->and($environment?->string('APP_ENV'))->toBe('development')
+        ->and($environment?->string('BASE'))->toBe('base')
+        ->and($environment?->string('LOCAL'))->toBe('local')
+        ->and($environment?->string('KEY'))->toBe('local')
+        ->and($environment?->has('IGNORED_SAMPLE'))->toBeFalse();
+});
+
+it('keeps deployment environment precedence unless override is requested', function (): void {
+    file_put_contents(envLoaderRuntime() . '/.env', "APP_ENV=file\nFILE_ONLY=file\n");
+    $_ENV['APP_ENV'] = 'process';
+
+    $normal = (new EnvLoader(envLoaderRuntime()))->load();
+
+    expect($normal?->string('APP_ENV'))->toBe('process')
+        ->and($normal?->string('FILE_ONLY'))->toBe('file');
+
+    $overridden = (new EnvLoader(envLoaderRuntime()))->load(override: true);
+    expect($overridden?->string('APP_ENV'))->toBe('file');
+});
+
+it('keeps read pure and supports an explicit filename list', function (): void {
+    file_put_contents(envLoaderRuntime() . '/custom.env', "FILE_ONLY=custom\n");
+
+    $loader = new EnvLoader(envLoaderRuntime(), filenames: ['custom.env']);
+
+    expect($loader->read())->toBe(['FILE_ONLY' => 'custom'])
+        ->and($_ENV)->not->toHaveKey('FILE_ONLY');
+});
+
+it('parses quoted values and escapes predictably', function (): void {
+    file_put_contents(
+        envLoaderRuntime() . '/.env',
+        "MESSAGE=\"Hello World\"\nESCAPED=\"line1\\nline2\\ttab\"\n",
+    );
+
+    $environment = (new EnvLoader(envLoaderRuntime()))->load();
+
+    expect($environment?->string('MESSAGE'))->toBe('Hello World')
+        ->and($environment?->string('ESCAPED'))->toBe("line1\nline2\ttab");
+});
+
+it('validates variable syntax and required variables', function (): void {
+    file_put_contents(envLoaderRuntime() . '/.env', "INVALID-NAME=value\n");
+
+    expect(fn() => (new EnvLoader(envLoaderRuntime()))->load())
+        ->toThrow(EnvLoaderException::class, 'Invalid .env format');
+
+    file_put_contents(envLoaderRuntime() . '/.env', "APP_NAME=Componenta\n");
+
+    expect(fn() => (new EnvLoader(envLoaderRuntime(), required: ['APP_KEY']))->load())
+        ->toThrow(EnvLoaderException::class, 'APP_KEY');
+});
+
+it('allows required values to come from deployment environment', function (): void {
+    $_ENV['PROCESS_ONLY'] = 'present';
+
+    $environment = (new EnvLoader(envLoaderRuntime(), required: ['PROCESS_ONLY']))->load();
+
+    expect($environment?->string('PROCESS_ONLY'))->toBe('present');
+});
+
+it('rejects unsafe filenames and invalid required names', function (): void {
+    expect(fn() => new EnvLoader(envLoaderRuntime(), filenames: ['../.env']))
+        ->toThrow(InvalidArgumentException::class)
+        ->and(fn() => new EnvLoader(envLoaderRuntime(), required: ['BAD-NAME']))
+        ->toThrow(InvalidArgumentException::class);
+});

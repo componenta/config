@@ -1,6 +1,8 @@
 # Componenta Config
 
-Immutable configuration and environment access for Componenta libraries.
+`componenta/config` is a small configuration library for PHP 8.4+. It provides immutable configuration snapshots, explicit nested paths, typed reads, environment loading, file providers, deterministic configuration composition, lazy values and PHP cache generation.
+
+The package does not depend on a framework. It can be used on its own or as the configuration layer for a dependency-injection container.
 
 ## Installation
 
@@ -8,290 +10,542 @@ Immutable configuration and environment access for Componenta libraries.
 composer require componenta/config
 ```
 
-This package intentionally does not declare an automatic provider in `extra.componenta.config-providers`.
-`Componenta\Config\ConfigProvider` is the base class used by package and application providers.
+## Quick start
 
-## Requirements
-
-- PHP 8.4+
-- `componenta/var-export` for cache export
-
-## Related Packages
-
-| Package | Why it matters here |
-|---|---|
-| `componenta/var-export` | Exports configuration into executable PHP cache files. |
-| `componenta/di` | Consumes the `dependencies` section returned by `ConfigProvider` classes. |
-| `componenta/app` | Chooses provider loading in development or cache loading in production. |
-
-## What It Provides
-
-- `Config`: immutable configuration container with literal keys and `ConfigPath` keys.
-- `Environment`: immutable environment container with typed accessors.
-- `ConfigLoader`: static loader/exporter for provider arrays and cache files.
-- `ConfigProvider`: base class for modular DI configuration.
-- `FileProvider`: PHP/JSON file provider with Componenta merge semantics.
-- `ContainerValue`: PSR-11-compatible wrapper around a container for configuration factories, with typed lookup helpers and direct access to `Config`.
-- `ContainerEntry`, `ConfigEntry`, `LazyValue`: explicit value objects for typed container lookup, references to other config keys, and lazy value evaluation.
-
-## Loading Configuration
-
-`ConfigLoader` does not decide dev/prod mode. Runtime bootstrap chooses whether to load providers or a prebuilt cache file.
+Create a configuration snapshot from an array:
 
 ```php
-use Componenta\Config\ConfigLoader;
-use Componenta\Config\Environment;
-use Componenta\Config\FileProvider;
-
-$environment = new Environment($_ENV);
-
-$config = ConfigLoader::load(
-    $environment,
-    new FileProvider(__DIR__ . '/config/*.php'),
-    static fn(): array => ['app' => ['debug' => false]],
-);
-```
-
-For production cache:
-
-```php
-use Componenta\Config\ConfigLoader;
-
-$config = ConfigLoader::loadFromFile(__DIR__ . '/var/cache/config.php', populateEnv: true);
-```
-
-To build cache:
-
-```php
-use Componenta\Config\ConfigLoader;
-
-ConfigLoader::export($config, __DIR__ . '/var/cache/config.php');
-```
-
-The exported file returns:
-
-```php
-[
-    'config' => [...],
-    'environment' => [...],
-]
-```
-
-## Accessing Values
-
-String keys are literal. `ConfigPath` keys resolve nested arrays.
-
-```php
+use Componenta\Config\Config;
 use function Componenta\Config\path;
 
-$config->get('database.host');        // literal key: $data['database.host']
-$config->get(path('database.host'));  // nested key: $data['database']['host']
+$config = new Config([
+    'app' => [
+        'name' => 'Example',
+        'debug' => false,
+    ],
+]);
+
+$name = $config->string(path('app.name'));
+$debug = $config->bool(path('app.debug'));
 ```
 
-Typed accessors convert values or throw:
+A plain string is always a **literal key**. Use `ConfigPath` when you want nested lookup:
+
+```php
+$config = new Config([
+    'database.host' => 'literal-key',
+    'database' => ['host' => 'localhost'],
+]);
+
+$config->get('database.host');       // literal-key
+$config->get(path('database.host')); // localhost
+```
+
+This distinction avoids ambiguity when configuration keys themselves contain dots.
+
+## Typed values
 
 ```php
 $host = $config->string(path('database.host'));
 $port = $config->int(path('database.port'), 3306);
-$debug = $config->bool(path('app.debug'), false);
-$tags = $config->array(path('app.tags'), []);
+$ratio = $config->float('ratio', 1.0);
+$enabled = $config->bool('enabled', false);
+$drivers = $config->array('drivers', []);
 ```
 
-If no default is provided, a missing key throws `ConfigException`.
-If a value cannot be converted to the requested type, `InvalidConfigValueException` is thrown.
-Defaults may be plain values, `config_entry(...)`, or `lazy(...)`; typed accessors resolve the default first and then validate the resulting type.
+Invalid conversions fail with `InvalidConfigValueException` instead of silently producing an unrelated value.
 
-## Typed Container Access
+`get()` returns the stored value as-is. Omit the default when a key is required; a missing required key raises `ConfigException`.
 
-`ContainerValue` wraps `Psr\Container\ContainerInterface` for configuration factories. It still implements PSR-11, so legacy factories typed as `ContainerInterface` continue to work, but new framework factories can type `ContainerValue` when they need fallback helpers or access to the application config.
+## Paths
 
 ```php
-use Componenta\Config\Config;
 use Componenta\Config\ConfigPath;
-use Componenta\Config\ContainerValue;
-use function Componenta\Config\config_entry;
-use function Componenta\Config\entry;
-use function Componenta\Config\lazy;
-use Psr\Log\LoggerInterface;
+use function Componenta\Config\path;
 
-$config = new Config(['app' => ['name' => 'Componenta']]);
-$services = new ContainerValue($container, $config);
+$path = new ConfigPath('database.connections.primary');
+$path = path('database.connections.primary');
 
-$logger = $services->get(LoggerInterface::class);
-$logger = $services->get(LoggerInterface::class, LoggerInterface::class);
-$auditLogger = $services->find('audit.logger', entry('logger.null', LoggerInterface::class));
-$appName = $services->find('app.name', config_entry(new ConfigPath('app.name'), 'Componenta'));
-$fallbackName = $services->find('fallback.name', lazy(
-    static fn (ContainerValue $container): string => $container->config->string(new ConfigPath('app.name'), 'Componenta'),
-));
-$appName = $services->config->string(new ConfigPath('app.name'), 'Componenta');
+$path->toArray();  // ['database', 'connections', 'primary']
+$path->first();    // database
+$path->last();     // primary
+$path->isNested(); // true
 ```
 
-`get($id)` is normal PSR-11 lookup and returns the raw entry. `get($id, $type)` additionally asserts the resolved entry type and throws `InvalidContainerValueException` when it does not match.
-`find($id, $default)` returns the existing entry when present. When the entry is absent, it returns the default value, resolves `entry(...)` from the container, resolves `config_entry(...)` from `$container->config`, or executes `lazy(...)` with the current `ContainerValue`. A plain callable default is returned as a callable value and is not executed.
+## Defaults and references
 
-When the entry `$id` exists and the default is `entry(..., Type::class)`, the type from `entry()` is applied to the existing entry. This lets optional overrides keep the same type assertion as their fallback.
+A normal default is returned when the requested key is absent:
 
-## Boolean Conversion
+```php
+$timeout = $config->int('timeout', 30);
+```
 
-Accepted truthy values:
+Use `ConfigEntry` when the fallback should come from another configuration key:
 
-- `true`
-- `1`
-- `yes`
-- `on`
-- `enabled`
-- `y`
+```php
+use function Componenta\Config\config_entry;
+use function Componenta\Config\path;
 
-Accepted falsy values:
+$name = $config->string(
+    'display_name',
+    config_entry(path('app.name')),
+);
+```
 
-- `false`
-- `0`
-- `no`
-- `off`
-- `disabled`
-- `n`
-- empty string
+## Lazy values
 
-Ambiguous values such as `42`, `-1`, arrays, `null`, or unknown strings are not silently coerced to bool.
+Plain callables are ordinary configuration values and are never executed automatically.
 
-## Lazy Values
-
-Plain callable config values are data and are not executed by `Config`. Use `lazy(...)` for computed configuration values. Lazy config values receive the current `Config` instance and are cached after the first call by default. Use `lazy($callback, cache: false)` when the value must be recomputed on every read.
-
-Callable defaults are also values: they are returned as callables and are not executed. Use `config_entry(...)` when a missing key should fall back to another config key.
+For explicit lazy evaluation, wrap the callback with `lazy()`:
 
 ```php
 use Componenta\Config\Config;
-use Componenta\Config\ConfigLoader;
-use function Componenta\Config\path;
 use function Componenta\Config\lazy;
 
-$config = ConfigLoader::load(null, static fn(): array => [
-    'database' => [
-        'host' => 'localhost',
-        'dsn' => lazy(static fn(Config $config): string => sprintf(
-            'mysql:host=%s',
-            $config->string(path('database.host')),
-        )),
-    ],
+$config = new Config([
+    'host' => 'localhost',
+    'dsn' => lazy(
+        static fn (Config $config): string =>
+            'mysql:host=' . $config->string('host'),
+    ),
 ]);
 
-$dsn = $config->string(path('database.dsn'));
+$dsn = $config->string('dsn');
 ```
 
-Plain callables are returned unchanged:
+Lazy results are cached by default **per `Config` or `ContainerValue` context**. Reusing the same lazy wrapper in another configuration snapshot cannot leak the result from the first snapshot.
+
+Disable caching when a value must be recomputed:
 
 ```php
-$callable = static fn(): string => 'raw';
-$config = new Config(['callback' => $callable]);
-
-$raw = $config->get('callback'); // same callable instance
+$value = lazy(
+    static fn (): int => random_int(1, 100),
+    cache: false,
+);
 ```
 
-Disable lazy caching explicitly:
+## Filtering configuration
+
+`Config` is immutable. `only()` and `except()` return new snapshots:
 
 ```php
-$fresh = lazy(static fn(Config $config): string => uniqid('', true), cache: false);
+$public = $config->only([
+    'app',
+    path('database.host'),
+]);
+
+$withoutSecrets = $config->except([
+    path('database.password'),
+]);
 ```
 
-## Environment
+The original instance is unchanged. `Config` also implements `Countable`, `IteratorAggregate`, read-only `ArrayAccess` and `Componenta\Arrayable\Arrayable`.
 
-`EnvLoader` loads `.env*` files from one or more directories and returns `?Environment`.
+## Environment values
+
+### Environment snapshot
+
+```php
+use Componenta\Config\Environment;
+
+$environment = new Environment([
+    'APP_ENV' => 'production',
+    'APP_DEBUG' => 'false',
+]);
+
+$mode = $environment->string('APP_ENV');
+$debug = $environment->bool('APP_DEBUG');
+```
+
+Snapshot the current process, `$_SERVER` and `$_ENV` with:
+
+```php
+$environment = Environment::fromGlobals();
+```
+
+Precedence is deterministic:
+
+```text
+process environment < $_SERVER < $_ENV
+```
+
+A `ConfigPath` is converted to upper snake case:
+
+```php
+$environment->string(path('database.host')); // DATABASE_HOST
+```
+
+### Loading `.env` files
+
+`EnvLoader` loads `.env` and `.env.local` by default, in that order:
 
 ```php
 use Componenta\Config\Loader\EnvLoader;
 
-$environment = (new EnvLoader(__DIR__))->load(
-    override: false,
-    populateServer: true,
+$environment = (new EnvLoader('.'))->load();
+```
+
+`.env.local` can override values from `.env`. Existing deployment values remain authoritative unless override is requested explicitly:
+
+```php
+$environment = (new EnvLoader('.'))->load(override: true);
+```
+
+Sample, backup and other `.env*` files are not discovered implicitly. Name alternative files explicitly:
+
+```php
+$loader = new EnvLoader(
+    '.',
+    filenames: ['.env', '.env.production'],
 );
 ```
 
-If no `.env*` files are found and no globals are available, `load()` returns `null`.
-
-Environment keys can be strings or `ConfigPath` objects. Paths are converted to uppercase snake case:
+Required variables may come from loaded files or from the deployment environment:
 
 ```php
-$environment->string('APP_ENV', 'production');
-$environment->string(path('database.host')); // DATABASE_HOST
+$loader = new EnvLoader(
+    '.',
+    required: ['APP_KEY', 'DATABASE_URL'],
+);
 ```
 
-## ConfigProvider
+`read()` parses files without mutating `$_ENV` or `$_SERVER`.
 
-Modules extend `ConfigProvider` to register DI metadata and module config.
-The base provider builds the final array from overridable sections:
+### Environment helper functions
 
-| Method | Section |
-|---|---|
-| `getProviders()` | Child providers merged after the current provider. |
-| `getConfig()` | Application/package config outside `dependencies`. |
-| `getFactories()` | Service factories, keyed by service id. |
-| `getInvokables()` | Classes instantiated directly; keyed entries also create aliases. |
-| `getAliases()` | Explicit service aliases. |
-| `getDelegators()` | Delegator factories, keyed by decorated service id. |
-| `getServices()` | Pre-built service instances. |
-| `getParameterResolvers()` | Custom constructor/method parameter resolvers keyed by priority. |
-| `shouldReplaceParameterResolvers()` | `true` replaces the default resolver chain; an explicitly overridden `false` can cancel an earlier `true`. |
-| `getAttributeHandlers()` | Runtime attribute handlers in registration order. |
-| `shouldReplaceAttributeHandlers()` | `true` replaces built-in handlers; an explicitly overridden `false` can cancel an earlier `true`. |
-| `getDependencyExtensions()` | Additional supported DI v2 keys not represented by the base hooks. Unknown keys and attempts to replace a base section are rejected. |
+```php
+use function Componenta\Config\env;
+use function Componenta\Config\env_array;
+use function Componenta\Config\env_bool;
+use function Componenta\Config\env_float;
+use function Componenta\Config\env_int;
+use function Componenta\Config\env_string;
+
+$name = env_string('APP_NAME', 'Example');
+$port = env_int('PORT', 8080);
+$debug = env_bool('APP_DEBUG', false);
+$ratio = env_float('RATIO', 1.0);
+$hosts = env_array('HOSTS', []);
+$value = env('CUSTOM_VALUE');
+```
+
+Typed helpers reject values they cannot safely convert.
+
+## Loading configuration from files
+
+`FileProvider` supports PHP and JSON by default:
+
+```php
+use Componenta\Config\FileProvider;
+
+$provider = new FileProvider('config/*.{php,json}');
+$data = $provider();
+```
+
+Files are processed in sorted path order and merged with `config_merge()`.
+
+PHP configuration files must return an array:
+
+```php
+<?php
+
+return [
+    'app' => [
+        'name' => 'Example',
+    ],
+];
+```
+
+JSON files must contain an object or array at the root.
+
+Every matched file is treated as a configuration input. An unreadable file, malformed file, unsupported matched extension or invalid root value fails fast with `ConfigException`.
+
+### Custom file readers
+
+Implement `FileReaderInterface`:
+
+```php
+use Componenta\Config\Reader\FileReaderInterface;
+
+final class IniReader implements FileReaderInterface
+{
+    public function readFile(string $file): ?array
+    {
+        if (!str_ends_with($file, '.ini')) {
+            return null;
+        }
+
+        $data = parse_ini_file($file, true);
+
+        if ($data === false) {
+            throw new RuntimeException('Invalid INI configuration.');
+        }
+
+        return $data;
+    }
+}
+```
+
+Return `null` only when the reader does not support the file format. Once a reader accepts an extension, read/parse failures should be reported rather than silently ignored.
+
+```php
+$provider = new FileProvider(
+    'config/*.ini',
+    readers: [new IniReader()],
+);
+```
+
+## Combining providers
+
+`ConfigLoader::load()` merges providers in the order they are passed:
+
+```php
+use Componenta\Config\ConfigLoader;
+
+$config = ConfigLoader::load(
+    $environment,
+    static fn (): array => require 'config/app.php',
+    static fn (): array => require 'config/local.php',
+);
+```
+
+Later providers may replace scalar/map values. Generic numeric arrays are appended.
+
+Direct merge:
+
+```php
+use function Componenta\Config\config_merge;
+
+$merged = config_merge(
+    ['middleware' => ['auth']],
+    ['middleware' => ['csrf']],
+);
+
+// ['middleware' => ['auth', 'csrf']]
+```
+
+## Configuration providers for packages
+
+Extend `ConfigProvider` when a library needs to publish both application settings and dependency-container metadata:
 
 ```php
 use Componenta\Config\ConfigProvider;
 
-final class AppConfigProvider extends ConfigProvider
+final class PackageConfigProvider extends ConfigProvider
 {
+    protected function getConfig(): array
+    {
+        return [
+            'feature' => ['enabled' => true],
+        ];
+    }
+
     protected function getFactories(): array
     {
         return [
-            LoggerInterface::class => LoggerFactory::class,
+            ServiceInterface::class => ServiceFactory::class,
         ];
     }
 
     protected function getAliases(): array
     {
         return [
-            CacheInterface::class => RedisCache::class,
-        ];
-    }
-
-    protected function getConfig(): array
-    {
-        return [
-            'app' => ['name' => 'Ophire'],
+            LoggerInterface::class => AppLogger::class,
         ];
     }
 }
 ```
 
-Calling a provider returns a config array with a `dependencies` section.
+Available dependency hooks:
 
-Empty arrays, `null`, and inherited default `false` replacement flags are omitted from that section. If a provider overrides either replacement hook and explicitly returns `false`, the flag is retained so a later provider can cancel an earlier `true`. Values nested inside a section are preserved, so a service whose value is `false` is not removed. The v1 `autowires` and property-resolver sections are not part of the v2 schema; normal concrete classes are autowired by DI v2, while attributes are handled through `getAttributeHandlers()`.
+```text
+getFactories()
+getInvokables()
+getAliases()
+getDelegators()
+getServices()
+getParameterResolvers()
+shouldReplaceParameterResolvers()
+getAttributeDefinitions()
+shouldReplaceAttributeDefinitions()
+getAttributeCapabilities()
+getDependencyExtensions()
+```
 
-### Provider Composition
-
-Provider order is significant. Generic application configuration keeps the normal Componenta merge rules, but the root `dependencies` section is composed according to its DI schema:
-
-- `factories`, `aliases`, and `services` are maps keyed by DI id. A later provider replaces the complete value for the same id; array-valued factories or services are not recursively spliced.
-- `parameter_resolvers` is a map keyed by semantic integer priority. Priorities are preserved, and a later resolver at the same priority replaces the earlier one.
-- `invokables` and `attribute_handlers` keep the normal list/keyed-array merge behavior.
-- `delegators` keep the historical Componenta merge behavior. `componenta/config` does not reinterpret version-specific DI callable-array shorthand during composition.
-- `parameter_resolvers_replace` and `attribute_handlers_replace` use the last explicitly supplied boolean value. An inherited base `false` is treated as “not specified”.
-
-When `ConfigKey::OVERRIDE_INDEXES` is encountered, it keeps the historical `array_replace_recursive()` behavior for that subtree. Schema-aware atomic-map composition does not override an explicit merge marker.
-
-Existing configuration cache files are replayed verbatim by `ConfigLoader::loadFromFile()`. After upgrading from 2.0.0, regenerate caches built from multiple providers so previously corrupted priorities or atomic DI values are not reused.
-
-## Factories And Aliases
-
-Do not register a factory or invokable under an id that is also an alias. DI resolves the alias first, so the definition under the requested id would be unreachable. Register competing implementations directly under the same interface id and let provider order select one:
+Compose child providers with `getProviders()`:
 
 ```php
-protected function getFactories(): array
+protected function getProviders(): iterable
 {
-    return [ServiceInterface::class => ServiceFactory::class];
+    return [
+        new DatabaseConfigProvider(),
+        new CacheConfigProvider(),
+    ];
 }
 ```
 
-Use a delegator when a package must add behavior around whichever implementation was selected. A later factory selects a replacement implementation; it does not disable delegators registered for that requested id.
+### Parameter resolvers
+
+Priorities are integer map keys and are preserved across provider composition:
+
+```php
+protected function getParameterResolvers(): array
+{
+    return [
+        900 => RequestResolver::class,
+        500 => TenantResolver::class,
+    ];
+}
+```
+
+When a later provider registers the same priority, it replaces that resolver atomically.
+
+To build a resolver chain from scratch:
+
+```php
+protected function shouldReplaceParameterResolvers(): bool
+{
+    return true;
+}
+```
+
+### Attribute definitions and capabilities
+
+Containers that support attribute composition can receive definitions and capability policies through the provider:
+
+```php
+protected function getAttributeDefinitions(): array
+{
+    return [
+        new AttributeDefinition(
+            attribute: FromTenant::class,
+            handler: new FromTenantHandler(),
+        ),
+    ];
+}
+
+protected function getAttributeCapabilities(): array
+{
+    return [
+        new CapabilityPolicy(ValueProvider::class, maxPerTarget: 1),
+    ];
+}
+```
+
+To replace built-in definitions:
+
+```php
+protected function shouldReplaceAttributeDefinitions(): bool
+{
+    return true;
+}
+```
+
+The concrete definition/capability objects belong to the consuming container package. `componenta/config` only transports and composes them.
+
+### Container-specific extensions
+
+If another container needs metadata not represented by the standard hooks:
+
+```php
+protected function getDependencyExtensions(): array
+{
+    return [
+        'container_specific_option' => [
+            'enabled' => true,
+        ],
+    ];
+}
+```
+
+Extension keys cannot replace standard dependency sections. The consuming package validates extension-specific keys and values.
+
+## Dependency merge semantics
+
+The root `dependencies` section has schema-aware composition:
+
+- `factories`, `aliases`, `services` and `parameter_resolvers` are identity maps; a later value for the same id/priority replaces the earlier value atomically.
+- `invokables`, `attribute_definitions` and `attribute_capabilities` are list-like and append in provider order.
+- delegators for the same service append in provider order.
+- replacement flags are scalar values; the later provider wins.
+- application configuration outside the root `dependencies` section uses normal recursive merge semantics.
+
+This keeps resolver priorities and factory/service definitions stable instead of accidentally reindexing or recursively merging values that are meant to be atomic.
+
+## Cache generation
+
+Build a configuration snapshot once and export it as PHP:
+
+```php
+use Componenta\Config\ConfigLoader;
+
+ConfigLoader::export(
+    $config,
+    'var/cache/config.php',
+);
+```
+
+Load it later:
+
+```php
+$config = ConfigLoader::loadFromFile(
+    'var/cache/config.php',
+    populateEnv: true,
+);
+```
+
+Cache files are written through a temporary file and activated with `rename()`, so readers never observe a partially written PHP payload.
+
+Configuration must be exportable by `componenta/var-export`. Runtime-only objects such as closures should be resolved or excluded before generating a persistent cache.
+
+## Container helpers
+
+`ContainerValue` wraps any PSR-11 container and exposes optional lookup helpers:
+
+```php
+use Componenta\Config\ContainerValue;
+
+$value = new ContainerValue($container, $config);
+
+$service = $value->get(ServiceInterface::class);
+$optional = $value->find('optional.service', default: null);
+```
+
+Typed entry fallback:
+
+```php
+use function Componenta\Config\entry;
+
+$clock = $value->find(
+    'clock',
+    entry('fallback.clock', ClockInterface::class),
+);
+```
+
+Configuration fallback:
+
+```php
+use function Componenta\Config\config_entry;
+use function Componenta\Config\path;
+
+$name = $value->find(
+    'display_name',
+    config_entry(path('app.name')),
+);
+```
+
+## Errors
+
+Configuration failures use `Componenta\Config\Exception\ConfigExceptionInterface`.
+
+Common exceptions:
+
+- `ConfigException` — missing keys, invalid providers, cache/file loading failures.
+- `InvalidConfigValueException` — typed conversion failed.
+- `InvalidContainerValueException` — a container entry does not satisfy the requested type.
+- `EnvLoaderException` — dotenv read, parse or required-variable failure.
+
+## Requirements
+
+- PHP 8.4+
+- PSR-11 container interfaces for container helpers

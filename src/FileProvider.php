@@ -4,79 +4,91 @@ declare(strict_types=1);
 
 namespace Componenta\Config;
 
+use Componenta\Config\Exception\ConfigException;
 use Componenta\Config\Reader\FileReaderInterface;
 use Componenta\Config\Reader\JsonFileReader;
 use Componenta\Config\Reader\PhpFileReader;
+use InvalidArgumentException;
 
 /**
- * File-based configuration provider.
+ * Loads every file matched by a glob pattern and merges them in sorted order.
  *
- * Loads configuration from files matching a glob pattern.
- * Files are processed in order and merged recursively.
- *
- * @example
- * ```php
- * $provider = new FileProvider('config/*.php');
- * $config = $provider();
- * ```
+ * A matched file must be handled by one configured reader. Unsupported,
+ * unreadable or malformed files fail fast instead of being silently ignored.
  */
 final class FileProvider
 {
-    /** @var FileReaderInterface[] */
+    /** @var list<FileReaderInterface> */
     private readonly array $readers;
 
-    /**
-     * @param string $pattern Glob pattern for configuration files
-     * @param iterable<FileReaderInterface>|null $readers Custom readers (defaults to PHP, JSON)
-     */
+    /** @param iterable<FileReaderInterface>|null $readers */
     public function __construct(
         private readonly string $pattern,
         ?iterable $readers = null,
     ) {
-        if ($readers === null) {
-            $this->readers = [
-                new PhpFileReader(),
-                new JsonFileReader(),
-            ];
-        } else {
-            $this->readers = is_array($readers) ? $readers : iterator_to_array($readers);
+        $readers ??= [new PhpFileReader(), new JsonFileReader()];
+
+        $normalized = [];
+        foreach ($readers as $reader) {
+            if (!$reader instanceof FileReaderInterface) {
+                throw new InvalidArgumentException(sprintf(
+                    'Configuration reader must implement %s; got %s.',
+                    FileReaderInterface::class,
+                    get_debug_type($reader),
+                ));
+            }
+
+            $normalized[] = $reader;
         }
+
+        $this->readers = $normalized;
     }
 
-    /**
-     * Load and merge configuration from matching files.
-     */
+    /** @return array<array-key, mixed> */
     public function __invoke(): array
     {
         $config = [];
 
-        foreach ($this->glob($this->pattern) as $file) {
+        foreach ($this->files() as $file) {
+            $handled = false;
+
             foreach ($this->readers as $reader) {
                 $data = $reader->readFile($file);
-
-                if ($data !== null) {
-                    if ($data !== []) {
-                        $config = config_merge($config, $data);
-                    }
-
-                    break;
+                if ($data === null) {
+                    continue;
                 }
+
+                $handled = true;
+                if ($data !== []) {
+                    $config = config_merge($config, $data);
+                }
+                break;
+            }
+
+            if (!$handled) {
+                throw new ConfigException(sprintf(
+                    'No configuration reader supports file "%s".',
+                    $file,
+                ));
             }
         }
 
         return $config;
     }
 
-    /**
-     * Glob with brace expansion support.
-     *
-     * @return string[]
-     */
-    private function glob(string $pattern): array
+    /** @return list<string> */
+    private function files(): array
     {
-        $files = glob($pattern, GLOB_BRACE) ?: [];
-        sort($files);
+        $files = glob($this->pattern, GLOB_BRACE);
+        if ($files === false) {
+            throw new ConfigException(sprintf(
+                'Invalid configuration glob pattern "%s".',
+                $this->pattern,
+            ));
+        }
 
-        return $files;
+        sort($files, SORT_STRING);
+
+        return array_values(array_filter($files, 'is_file'));
     }
 }

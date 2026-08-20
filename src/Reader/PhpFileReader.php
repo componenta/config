@@ -4,25 +4,40 @@ declare(strict_types=1);
 
 namespace Componenta\Config\Reader;
 
-/**
- * PHP file reader for configuration files.
- *
- * Includes PHP files that return arrays.
- */
+use Componenta\Config\Exception\ConfigException;
+use Throwable;
+
 final class PhpFileReader implements FileReaderInterface
 {
     public function readFile(string $file): ?array
     {
-        if (!str_ends_with($file, '.php')) {
+        if (!str_ends_with(strtolower($file), '.php')) {
             return null;
         }
 
-        if (!file_exists($file) || !is_readable($file)) {
-            return null;
+        if (!is_file($file) || !is_readable($file)) {
+            throw new ConfigException(sprintf(
+                'PHP configuration file "%s" is not readable.',
+                $file,
+            ));
         }
 
-        $data = include $file;
+        try {
+            $data = include $file;
+        } catch (Throwable $e) {
+            throw new ConfigException(
+                sprintf('Failed to load PHP configuration file "%s": %s', $file, $e->getMessage()),
+                previous: $e,
+            );
+        }
 
-        return is_array($data) ? $data : null;
+        if (!is_array($data)) {
+            throw new ConfigException(sprintf(
+                'PHP configuration file "%s" must return an array.',
+                $file,
+            ));
+        }
+
+        return $data;
     }
 }

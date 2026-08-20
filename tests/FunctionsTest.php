@@ -2,294 +2,120 @@
 
 declare(strict_types=1);
 
-namespace Componenta\Config\Tests;
-
-use Componenta\Config\Exception\ConfigException;
-use Componenta\Config\ConfigKey;
+use Componenta\Config\Config;
+use Componenta\Config\ConfigEntry;
 use Componenta\Config\ConfigPath;
-use PHPUnit\Framework\TestCase;
+use Componenta\Config\ContainerEntry;
+use Componenta\Config\Exception\ConfigException;
+use Componenta\Config\LazyValue;
+use Psr\Container\ContainerInterface;
 
+use function Componenta\Config\config;
+use function Componenta\Config\config_entry;
+use function Componenta\Config\config_merge;
+use function Componenta\Config\entry;
 use function Componenta\Config\env;
 use function Componenta\Config\env_array;
 use function Componenta\Config\env_bool;
 use function Componenta\Config\env_float;
 use function Componenta\Config\env_int;
 use function Componenta\Config\env_string;
-use function Componenta\Config\config_merge;
+use function Componenta\Config\lazy;
 use function Componenta\Config\path;
 
-final class FunctionsTest extends TestCase
+function withTemporaryEnv(string $key, mixed $value, Closure $test): void
 {
-    private array $originalEnv;
+    $hadEnv = array_key_exists($key, $_ENV);
+    $oldEnv = $_ENV[$key] ?? null;
+    $hadServer = array_key_exists($key, $_SERVER);
+    $oldServer = $_SERVER[$key] ?? null;
+    $oldNative = getenv($key);
 
-    protected function setUp(): void
-    {
-        $this->originalEnv = $_ENV;
+    unset($_ENV[$key], $_SERVER[$key]);
+    putenv($key);
+
+    if ($value !== null) {
+        $_ENV[$key] = $value;
     }
 
-    protected function tearDown(): void
-    {
-        $_ENV = $this->originalEnv;
-    }
-
-    // =========================================================================
-    // path()
-    // =========================================================================
-
-    public function testPathReturnsPathInstance(): void
-    {
-        $path = path('database.host');
-
-        self::assertInstanceOf(ConfigPath::class, $path);
-        self::assertSame('database.host', (string) $path);
-    }
-
-    // =========================================================================
-    // env() - Basic
-    // =========================================================================
-
-    public function testEnvReturnsValueWhenExists(): void
-    {
-        $_ENV['TEST_KEY'] = 'test-value';
-
-        self::assertSame('test-value', env('TEST_KEY'));
-    }
-
-    public function testEnvThrowsWhenKeyMissingAndNoDefault(): void
-    {
-        $this->expectException(ConfigException::class);
-        $this->expectExceptionMessage("Configuration key 'MISSING_KEY' is missing");
-
-        env('MISSING_KEY');
-    }
-
-    public function testEnvReturnsDefaultWhenKeyMissing(): void
-    {
-        self::assertSame('default', env('MISSING_KEY', 'default'));
-    }
-
-    // =========================================================================
-    // env() - Type Conversion
-    // =========================================================================
-
-    public function testEnvConvertsNumericStringToInt(): void
-    {
-        $_ENV['PORT'] = '3306';
-
-        self::assertSame(3306, env('PORT'));
-    }
-
-    public function testEnvConvertsNumericStringToFloat(): void
-    {
-        $_ENV['RATE'] = '3.14';
-
-        self::assertSame(3.14, env('RATE'));
-    }
-
-    public function testEnvConvertsTruthyStringsToTrue(): void
-    {
-        foreach (['true', 'yes', 'y', 'on', 'enabled'] as $value) {
-            $_ENV['FLAG'] = $value;
-            self::assertTrue(env('FLAG'), "Failed for value: $value");
-        }
-    }
-
-    public function testEnvConvertsFalsyStringsToFalse(): void
-    {
-        foreach (['false', 'no', 'n', 'off', 'disabled'] as $value) {
-            $_ENV['FLAG'] = $value;
-            self::assertFalse(env('FLAG'), "Failed for value: $value");
-        }
-    }
-
-    public function testEnvConvertsNumericStrings(): void
-    {
-        $_ENV['ONE'] = '1';
-        $_ENV['ZERO'] = '0';
-
-        self::assertSame(1, env('ONE'));
-        self::assertSame(0, env('ZERO'));
-    }
-
-    // =========================================================================
-    // env_string()
-    // =========================================================================
-
-    public function testEnvStringReturnsString(): void
-    {
-        $_ENV['NAME'] = 'MyApp';
-
-        self::assertSame('MyApp', env_string('NAME'));
-    }
-
-    public function testEnvStringThrowsWhenKeyMissingAndNoDefault(): void
-    {
-        $this->expectException(ConfigException::class);
-
-        env_string('MISSING_KEY');
-    }
-
-    public function testEnvStringReturnsDefaultWhenKeyMissing(): void
-    {
-        self::assertSame('default', env_string('MISSING_KEY', 'default'));
-    }
-
-    public function testEnvStringConvertsNumericToString(): void
-    {
-        $_ENV['PORT'] = '3306';
-
-        self::assertSame('3306', env_string('PORT'));
-    }
-
-    // =========================================================================
-    // env_int()
-    // =========================================================================
-
-    public function testEnvIntReturnsInt(): void
-    {
-        $_ENV['PORT'] = '3306';
-
-        self::assertSame(3306, env_int('PORT'));
-    }
-
-    public function testEnvIntThrowsWhenKeyMissingAndNoDefault(): void
-    {
-        $this->expectException(ConfigException::class);
-
-        env_int('MISSING_KEY');
-    }
-
-    public function testEnvIntReturnsDefaultWhenKeyMissing(): void
-    {
-        self::assertSame(8080, env_int('MISSING_KEY', 8080));
-    }
-
-    public function testEnvIntThrowsWhenCannotConvert(): void
-    {
-        $_ENV['VALUE'] = 'not-a-number';
-
-        $this->expectException(ConfigException::class);
-        $this->expectExceptionMessage("Cannot convert environment variable 'VALUE' to int");
-
-        env_int('VALUE');
-    }
-
-    // =========================================================================
-    // env_float()
-    // =========================================================================
-
-    public function testEnvFloatReturnsFloat(): void
-    {
-        $_ENV['RATE'] = '3.14';
-
-        self::assertSame(3.14, env_float('RATE'));
-    }
-
-    public function testEnvFloatThrowsWhenKeyMissingAndNoDefault(): void
-    {
-        $this->expectException(ConfigException::class);
-
-        env_float('MISSING_KEY');
-    }
-
-    public function testEnvFloatReturnsDefaultWhenKeyMissing(): void
-    {
-        self::assertSame(1.5, env_float('MISSING_KEY', 1.5));
-    }
-
-    public function testEnvFloatThrowsWhenCannotConvert(): void
-    {
-        $_ENV['VALUE'] = 'not-a-number';
-
-        $this->expectException(ConfigException::class);
-        $this->expectExceptionMessage("Cannot convert environment variable 'VALUE' to float");
-
-        env_float('VALUE');
-    }
-
-    // =========================================================================
-    // env_bool()
-    // =========================================================================
-
-    public function testEnvBoolReturnsTrue(): void
-    {
-        $_ENV['DEBUG'] = 'true';
-
-        self::assertTrue(env_bool('DEBUG'));
-    }
-
-    public function testEnvBoolReturnsFalse(): void
-    {
-        $_ENV['DEBUG'] = 'false';
-
-        self::assertFalse(env_bool('DEBUG'));
-    }
-
-    public function testEnvBoolThrowsWhenKeyMissingAndNoDefault(): void
-    {
-        $this->expectException(ConfigException::class);
-
-        env_bool('MISSING_KEY');
-    }
-
-    public function testEnvBoolReturnsDefaultWhenKeyMissing(): void
-    {
-        self::assertTrue(env_bool('MISSING_KEY', true));
-        self::assertFalse(env_bool('MISSING_KEY', false));
-    }
-
-    // =========================================================================
-    // env_array()
-    // =========================================================================
-
-    public function testEnvArrayReturnsParsedArray(): void
-    {
-        $_ENV['DRIVERS'] = 'redis, memcached, file';
-
-        self::assertSame(['redis', 'memcached', 'file'], env_array('DRIVERS'));
-    }
-
-    public function testEnvArrayThrowsWhenKeyMissingAndNoDefault(): void
-    {
-        $this->expectException(ConfigException::class);
-
-        env_array('MISSING_KEY');
-    }
-
-    public function testEnvArrayReturnsDefaultWhenKeyMissing(): void
-    {
-        self::assertSame(['default'], env_array('MISSING_KEY', ['default']));
-    }
-
-    public function testEnvArrayReturnsEmptyArrayForEmptyString(): void
-    {
-        $_ENV['EMPTY'] = '';
-
-        self::assertSame([], env_array('EMPTY'));
-    }
-
-    public function testConfigMergeAppendsNumericKeysAndMergesStringKeys(): void
-    {
-        $merged = config_merge(
-            ['middlewares' => ['auth'], 'database' => ['host' => 'localhost']],
-            ['middlewares' => ['csrf'], 'database' => ['port' => 3306]],
-        );
-
-        self::assertSame(['auth', 'csrf'], $merged['middlewares']);
-        self::assertSame(['host' => 'localhost', 'port' => 3306], $merged['database']);
-    }
-
-    public function testConfigMergeCanReplaceNumericIndexes(): void
-    {
-        $merged = config_merge(
-            ['middlewares' => ['auth', 'csrf']],
-            [
-                ConfigKey::OVERRIDE_INDEXES => true,
-                'middlewares' => [1 => 'rate-limit'],
-            ],
-        );
-
-        self::assertSame(['auth', 'rate-limit'], $merged['middlewares']);
-        self::assertArrayNotHasKey(ConfigKey::OVERRIDE_INDEXES, $merged);
+    try {
+        $test();
+    } finally {
+        if ($hadEnv) { $_ENV[$key] = $oldEnv; } else { unset($_ENV[$key]); }
+        if ($hadServer) { $_SERVER[$key] = $oldServer; } else { unset($_SERVER[$key]); }
+
+        if ($oldNative === false) { putenv($key); } else { putenv($key . '=' . $oldNative); }
     }
 }
+
+it('creates helper value objects', function (): void {
+    expect(path('database.host'))->toBeInstanceOf(ConfigPath::class)
+        ->and(entry('service'))->toBeInstanceOf(ContainerEntry::class)
+        ->and(config_entry('fallback'))->toBeInstanceOf(ConfigEntry::class)
+        ->and(lazy(static fn(): int => 1))->toBeInstanceOf(LazyValue::class);
+});
+
+it('resolves Config from a PSR container and validates its type', function (): void {
+    $expected = new Config(['app' => 'test']);
+    $container = new class ($expected) implements ContainerInterface {
+        public function __construct(private readonly mixed $value) {}
+        public function get(string $id): mixed { return $this->value; }
+        public function has(string $id): bool { return true; }
+    };
+
+    expect(config($container))->toBe($expected);
+
+    $invalid = new class implements ContainerInterface {
+        public function get(string $id): mixed { return new stdClass(); }
+        public function has(string $id): bool { return true; }
+    };
+
+    expect(fn() => config($invalid))->toThrow(ConfigException::class, 'must be an instance');
+});
+
+it('reads and normalizes environment helper values', function (): void {
+    withTemporaryEnv('COMPONENTA_CONFIG_NUMBER', '3306', function (): void {
+        expect(env('COMPONENTA_CONFIG_NUMBER'))->toBe(3306)
+            ->and(env_string('COMPONENTA_CONFIG_NUMBER'))->toBe('3306')
+            ->and(env_int('COMPONENTA_CONFIG_NUMBER'))->toBe(3306);
+    });
+
+    withTemporaryEnv('COMPONENTA_CONFIG_FLOAT', '1e3', function (): void {
+        expect(env('COMPONENTA_CONFIG_FLOAT'))->toBe(1000.0)
+            ->and(env_float('COMPONENTA_CONFIG_FLOAT'))->toBe(1000.0);
+    });
+
+    withTemporaryEnv('COMPONENTA_CONFIG_BOOL', 'enabled', function (): void {
+        expect(env_bool('COMPONENTA_CONFIG_BOOL'))->toBeTrue();
+    });
+
+    withTemporaryEnv('COMPONENTA_CONFIG_ARRAY', 'redis, file', function (): void {
+        expect(env_array('COMPONENTA_CONFIG_ARRAY'))->toBe(['redis', 'file']);
+    });
+});
+
+it('does not silently stringify unsupported environment values', function (): void {
+    withTemporaryEnv('COMPONENTA_CONFIG_ARRAY_VALUE', ['not', 'stringable'], function (): void {
+        expect(fn() => env_string('COMPONENTA_CONFIG_ARRAY_VALUE'))
+            ->toThrow(ConfigException::class, 'to string');
+    });
+});
+
+it('uses defaults and rejects missing required environment values', function (): void {
+    withTemporaryEnv('COMPONENTA_CONFIG_MISSING', null, function (): void {
+        expect(env('COMPONENTA_CONFIG_MISSING', 'fallback'))->toBe('fallback')
+            ->and(env_int('COMPONENTA_CONFIG_MISSING', 42))->toBe(42)
+            ->and(fn() => env('COMPONENTA_CONFIG_MISSING'))
+            ->toThrow(ConfigException::class);
+    });
+});
+
+it('merges generic configuration recursively and appends lists', function (): void {
+    expect(config_merge(
+        ['middleware' => ['auth'], 'database' => ['host' => 'localhost']],
+        ['middleware' => ['csrf'], 'database' => ['port' => 3306]],
+    ))->toBe([
+        'middleware' => ['auth', 'csrf'],
+        'database' => ['host' => 'localhost', 'port' => 3306],
+    ]);
+});

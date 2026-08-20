@@ -5,116 +5,68 @@ declare(strict_types=1);
 namespace Componenta\Config;
 
 use Componenta\Config\Exception\ConfigException;
-use Componenta\VarExport\Export;
 use Componenta\VarExport\Config\ExportConfig;
+use Componenta\VarExport\Export;
+use Throwable;
 
 /**
- * Configuration loader and exporter.
- *
- * Responsible for:
- *  - loading configuration data from providers
- *  - loading configuration from a pre-generated PHP cache file
- *  - exporting configuration into a PHP cache file
- *
- * This class does NOT decide whether to use cache or providers -
- * that responsibility is delegated to the application bootstrap logic.
- *
- * @example
- * ```php
- * // Load from providers (development)
- * $config = ConfigLoader::load(
- *     $environment,
- *     fn () => require 'config/app.php',
- *     fn () => require 'config/db.php',
- * );
- *
- * // Load from cache (production) with $_ENV population
- * $config = ConfigLoader::loadFromFile(
- *     'var/cache/config.php',
- *     populateEnv: true,
- * );
- *
- * // Export configuration during build/deploy
- * ConfigLoader::export($config, 'var/cache/config.php');
- * ```
+ * Builds Config instances from providers and persists fully exportable config
+ * snapshots as PHP cache files.
  */
 final class ConfigLoader
 {
-    /**
-     * Load configuration from providers.
-     *
-     * Aggregates provider output using Componenta merge semantics. Generic
-     * numeric arrays append, while the root `dependencies` section uses
-     * schema-aware DI composition so priorities and opaque service definitions
-     * keep their meaning across providers.
-     *
-     * Providers must return an array or iterable.
-     *
-     * @param ?Environment $environment Environment container
-     * @param callable ...$providers Configuration providers
-     *
-     * @throws ConfigException If a provider returns an invalid value
-     */
     public static function load(?Environment $environment, callable ...$providers): Config
     {
         return new Config(self::merge($providers), $environment);
     }
 
-    /**
-     * Load configuration from a PHP cache file.
-     *
-     * The cache file must return an array with the following structure:
-     *
-     * @phpstan-type ConfigCache array{
-     *     config: array,
-     *     environment?: array
-     * }
-     *
-     * @param string $file Path to cache file
-     * @param bool $populateEnv Whether to populate $_ENV/$_SERVER from cached environment
-     *
-     * @return Config
-     */
     public static function loadFromFile(string $file, bool $populateEnv = false): Config
     {
+        if (!is_file($file) || !is_readable($file)) {
+            throw new ConfigException(sprintf(
+                'Configuration cache file "%s" is not readable.',
+                $file,
+            ));
+        }
+
         try {
             $cached = include $file;
 
             if (!is_array($cached)) {
-                throw new ConfigException('Invalid cache file format');
+                throw new ConfigException('Invalid configuration cache format.');
             }
 
-            $environment = null;
-
-            if (isset($cached['environment'])) {
-                if ($populateEnv) {
-                    populate_env($cached['environment']);
-                }
-
-                $environment = new Environment($cached['environment']);
+            $data = $cached['config'] ?? [];
+            if (!is_array($data)) {
+                throw new ConfigException('Configuration cache "config" entry must be an array.');
             }
 
-            return new Config($cached['config'] ?? [], $environment);
+            $environmentData = $cached['environment'] ?? null;
+            if ($environmentData !== null && !is_array($environmentData)) {
+                throw new ConfigException(
+                    'Configuration cache "environment" entry must be an array or null.',
+                );
+            }
 
+            if ($populateEnv && $environmentData !== null) {
+                /** @var array<string, string> $environmentData */
+                populate_env($environmentData);
+            }
+
+            return new Config(
+                $data,
+                $environmentData === null ? null : new Environment($environmentData),
+            );
         } catch (ConfigException $e) {
             throw $e;
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             throw new ConfigException(
-                'Failed to load configuration from cache: ' . $e->getMessage(),
+                sprintf('Failed to load configuration cache "%s": %s', $file, $e->getMessage()),
+                previous: $e,
             );
         }
     }
 
-    /**
-     * Export configuration to a PHP cache file.
-     *
-     * The resulting file can be loaded using {@see loadFromFile()}.
-     *
-     * @param Config $config Configuration instance
-     * @param string $filename Destination file path
-     *
-     * @throws ConfigException If export fails
-     */
     public static function export(Config $config, string $filename): void
     {
         self::exportToFile($filename, [
@@ -123,65 +75,73 @@ final class ConfigLoader
         ]);
     }
 
-    /**
-     * Export raw configuration data to a PHP file.
-     *
-     * The file is written atomically using a temporary file
-     * and invalidates OPcache if available.
-     *
-     * @param string $filename Destination file path
-     * @param array $data Data to export
-     *
-     * @throws ConfigException If export fails
-     */
+    /** @param array<array-key, mixed> $data */
     private static function exportToFile(string $filename, array $data): void
     {
+        $temporary = null;
+
         try {
             $directory = dirname($filename);
 
-            if (!is_dir($directory)) {
-                mkdir($directory, 0755, true);
+            if (!is_dir($directory)
+                && !mkdir($directory, 0755, true)
+                && !is_dir($directory)
+            ) {
+                throw new \RuntimeException(sprintf(
+                    'Cannot create cache directory "%s".',
+                    $directory,
+                ));
             }
 
             $exported = Export::pretty(
                 $data,
-                ExportConfig::pretty()->withTrailingComma()
+                ExportConfig::pretty()->withTrailingComma(),
             );
 
-            $content = "<?php\n\ndeclare(strict_types=1);\n\nreturn $exported;\n";
-            $tempFile = $filename . '.tmp.' . uniqid('', true);
+            $content = "<?php\n\ndeclare(strict_types=1);\n\nreturn {$exported};\n";
+            $temporary = self::temporaryPath($filename);
+            $stream = fopen($temporary, 'xb');
 
-            if (file_put_contents($tempFile, $content) === false) {
-                throw new \RuntimeException('Failed to write temporary file');
+            if ($stream === false) {
+                throw new \RuntimeException('Cannot create temporary cache file.');
             }
 
-            if (!rename($tempFile, $filename)) {
-                @unlink($tempFile);
-                throw new \RuntimeException('Failed to replace cache file');
+            try {
+                self::writeAll($stream, $content);
+
+                if (!fflush($stream)) {
+                    throw new \RuntimeException('Cannot flush temporary cache file.');
+                }
+            } finally {
+                fclose($stream);
             }
+
+            if (!rename($temporary, $filename)) {
+                throw new \RuntimeException('Cannot activate configuration cache file.');
+            }
+
+            $temporary = null;
 
             if (function_exists('opcache_invalidate')) {
-                opcache_invalidate($filename, true);
+                @opcache_invalidate($filename, true);
+            }
+        } catch (Throwable $e) {
+            if ($temporary !== null) {
+                @unlink($temporary);
             }
 
-        } catch (\Throwable $e) {
+            if ($e instanceof ConfigException) {
+                throw $e;
+            }
+
             throw new ConfigException(
                 'Failed to export configuration: ' . $e->getMessage(),
+                previous: $e,
             );
         }
     }
 
-    /**
-     * Merge configuration data from providers.
-     *
-     * Provider order is significant and is interpreted by {@see config_merge()}
-     * according to generic and root-DI merge semantics.
-     *
-     * @param callable[] $providers
-     *
-     * @return array
-     * @throws ConfigException If a provider returns a non-array value
-     */
+    /** @param list<callable> $providers @return array<array-key, mixed> */
     private static function merge(array $providers): array
     {
         $merged = [];
@@ -190,22 +150,48 @@ final class ConfigLoader
             $data = $provider();
 
             if (!is_array($data)) {
-                if (is_iterable($data)) {
-                    $data = iterator_to_array($data);
-                } else {
-                    throw new ConfigException(
-                        'Configuration provider must return an array or iterable'
-                    );
+                if (!is_iterable($data)) {
+                    throw new ConfigException(sprintf(
+                        'Configuration provider must return an array or iterable; got %s.',
+                        get_debug_type($data),
+                    ));
                 }
+
+                $data = iterator_to_array($data);
             }
 
-            if ($data === []) {
-                continue;
+            if ($data !== []) {
+                $merged = config_merge($merged, $data);
             }
-
-            $merged = config_merge($merged, $data);
         }
 
         return $merged;
+    }
+
+    private static function temporaryPath(string $filename): string
+    {
+        return sprintf(
+            '%s.tmp.%s.%s',
+            $filename,
+            getmypid(),
+            bin2hex(random_bytes(8)),
+        );
+    }
+
+    /** @param resource $stream */
+    private static function writeAll($stream, string $content): void
+    {
+        $offset = 0;
+        $length = strlen($content);
+
+        while ($offset < $length) {
+            $written = fwrite($stream, substr($content, $offset));
+
+            if ($written === false || $written === 0) {
+                throw new \RuntimeException('Cannot write temporary cache file.');
+            }
+
+            $offset += $written;
+        }
     }
 }

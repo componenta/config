@@ -2,112 +2,70 @@
 
 declare(strict_types=1);
 
-namespace Componenta\Config\Tests;
-
+use Componenta\Config\Exception\ConfigException;
 use Componenta\Config\FileProvider;
-use PHPUnit\Framework\TestCase;
+use Componenta\Config\Reader\FileReaderInterface;
 
-final class FileProviderTest extends TestCase
+function fileProviderRuntime(): string
 {
-    private const string FIXTURES = __DIR__ . '/fixtures/config';
-
-    // =========================================================================
-    // PHP FILES
-    // =========================================================================
-
-    public function testInvokeLoadsPhpFile(): void
-    {
-        $provider = new FileProvider(self::FIXTURES . '/app.php');
-
-        $config = $provider();
-
-        self::assertSame('Componenta', $config['app']['name']);
-        self::assertTrue($config['debug']);
-    }
-
-    public function testInvokeMergesRecursively(): void
-    {
-        $provider = new FileProvider(self::FIXTURES . '/merge/*.php');
-
-        $config = $provider();
-
-        self::assertSame('Base', $config['app']['name']);
-        self::assertTrue($config['app']['debug']);
-    }
-
-    public function testInvokeIgnoresNonArrayReturns(): void
-    {
-        $provider = new FileProvider(self::FIXTURES . '/{app,invalid}.php');
-
-        $config = $provider();
-
-        self::assertSame('Componenta', $config['app']['name']);
-        self::assertArrayNotHasKey(0, $config);
-    }
-
-    // =========================================================================
-    // JSON FILES
-    // =========================================================================
-
-    public function testInvokeLoadsJsonFile(): void
-    {
-        $provider = new FileProvider(self::FIXTURES . '/database.json');
-
-        $config = $provider();
-
-        self::assertSame('localhost', $config['database']['host']);
-        self::assertSame(3306, $config['database']['port']);
-    }
-
-    public function testInvokeMergesPhpAndJsonFiles(): void
-    {
-        $provider = new FileProvider(self::FIXTURES . '/*.{php,json}');
-
-        $config = $provider();
-
-        self::assertArrayHasKey('app', $config);
-        self::assertArrayHasKey('database', $config);
-    }
-
-    public function testInvokeUsesConfigMergeSemanticsForNumericKeys(): void
-    {
-        $provider = new FileProvider(self::FIXTURES . '/lists/*.php');
-
-        $config = $provider();
-
-        self::assertSame(['auth', 'csrf'], $config['middlewares']);
-    }
-
-    // =========================================================================
-    // PATTERN MATCHING
-    // =========================================================================
-
-    public function testInvokeProcessesFilesInOrder(): void
-    {
-        $provider = new FileProvider(self::FIXTURES . '/order/*.php');
-
-        $config = $provider();
-
-        self::assertFalse($config['first']);
-        self::assertTrue($config['second']);
-        self::assertSame('second', $config['order']);
-    }
-
-    public function testInvokeReturnsEmptyArrayWhenNoFilesMatch(): void
-    {
-        $provider = new FileProvider(self::FIXTURES . '/nonexistent/*.php');
-
-        $config = $provider();
-
-        self::assertSame([], $config);
-    }
-
-    public function testInvokeHandlesEmptyDirectory(): void
-    {
-        $provider = new FileProvider(self::FIXTURES . '/empty/*.php');
-
-        $config = $provider();
-
-        self::assertSame([], $config);
-    }
+    static $root;
+    return $root ??= sys_get_temp_dir() . '/componenta_file_provider_' . bin2hex(random_bytes(5));
 }
+
+beforeEach(function (): void { @mkdir(fileProviderRuntime(), 0700, true); });
+afterEach(function (): void {
+    foreach (glob(fileProviderRuntime() . '/*') ?: [] as $file) { is_file($file) && unlink($file); }
+    @rmdir(fileProviderRuntime());
+});
+
+it('loads PHP and JSON files in sorted order and merges them', function (): void {
+    file_put_contents(
+        fileProviderRuntime() . '/01.php',
+        "<?php return ['app' => ['name' => 'Componenta'], 'list' => ['a']];",
+    );
+    file_put_contents(fileProviderRuntime() . '/02.json', '{"app":{"debug":true},"list":["b"]}');
+
+    $config = (new FileProvider(fileProviderRuntime() . '/*.{php,json}'))();
+
+    expect($config)->toBe([
+        'app' => ['name' => 'Componenta', 'debug' => true],
+        'list' => ['a', 'b'],
+    ]);
+});
+
+it('fails when a PHP config does not return an array', function (): void {
+    file_put_contents(fileProviderRuntime() . '/invalid.php', "<?php return 'invalid';");
+
+    expect(fn() => (new FileProvider(fileProviderRuntime() . '/*.php'))())
+        ->toThrow(ConfigException::class, 'must return an array');
+});
+
+it('fails when JSON root is not configuration data', function (): void {
+    file_put_contents(fileProviderRuntime() . '/invalid.json', '"string"');
+
+    expect(fn() => (new FileProvider(fileProviderRuntime() . '/*.json'))())
+        ->toThrow(ConfigException::class, 'object or array');
+});
+
+it('fails on malformed JSON', function (): void {
+    file_put_contents(fileProviderRuntime() . '/invalid.json', '{');
+
+    expect(fn() => (new FileProvider(fileProviderRuntime() . '/*.json'))())
+        ->toThrow(ConfigException::class, 'Failed to parse JSON');
+});
+
+it('fails when a matched file has no supporting reader', function (): void {
+    file_put_contents(fileProviderRuntime() . '/config.yaml', "app: test\n");
+
+    expect(fn() => (new FileProvider(fileProviderRuntime() . '/*.yaml'))())
+        ->toThrow(ConfigException::class, 'No configuration reader supports');
+});
+
+it('validates custom readers', function (): void {
+    expect(fn() => new FileProvider('*.php', [new stdClass()]))
+        ->toThrow(InvalidArgumentException::class, FileReaderInterface::class);
+});
+
+it('returns an empty array when nothing matches', function (): void {
+    expect((new FileProvider(fileProviderRuntime() . '/*.php'))())->toBe([]);
+});
