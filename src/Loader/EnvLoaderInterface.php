@@ -6,16 +6,11 @@ namespace Componenta\Config\Loader;
 
 use Componenta\Config\Environment;
 
-/**
- * Environment loader interface.
- */
 interface EnvLoaderInterface
 {
     /**
-     * Load environment variables and populate $_ENV/$_SERVER superglobals.
-     *
-     * @param bool $override Whether to override existing values
-     * @param bool $populateServer Whether to also populate $_SERVER
+     * Load configured dotenv files into $_ENV and return the effective runtime
+     * environment snapshot. Existing runtime values win unless overridden.
      */
-    public function load(bool $override = false, bool $populateServer = true):? Environment;
+    public function load(bool $override = false): Environment;
 }

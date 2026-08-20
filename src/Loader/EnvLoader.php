@@ -14,8 +14,8 @@ use function Componenta\Config\populate_env;
  * Loads explicitly named dotenv files from one or more directories.
  *
  * Default precedence is `.env` followed by `.env.local`. Later files override
- * earlier file values; existing process/environment values remain authoritative
- * unless load(override: true) is requested.
+ * earlier file values; existing runtime values remain authoritative unless
+ * load(override: true) is requested.
  */
 final class EnvLoader implements EnvLoaderInterface
 {
@@ -66,23 +66,18 @@ final class EnvLoader implements EnvLoaderInterface
         return $found ? $loaded : null;
     }
 
-    public function load(bool $override = false, bool $populateServer = true): ?Environment
+    public function load(bool $override = false): Environment
     {
         $loaded = $this->read() ?? [];
 
         if ($loaded !== []) {
-            populate_env($loaded, $override, $populateServer);
+            populate_env($loaded, $override);
         }
 
-        $effective = Environment::fromGlobals()->toArray();
-        $this->validateRequired($effective);
+        $environment = Environment::fromGlobals();
+        $this->validateRequired($environment->toArray());
 
-        return $effective === [] ? null : new Environment($effective);
-    }
-
-    public static function processEnvironment(): Environment
-    {
-        return Environment::fromGlobals();
+        return $environment;
     }
 
     /** @return list<string> */

@@ -149,21 +149,14 @@ function config_merge(array $base, array $override): array
 }
 
 /** @internal @param array<string, mixed> $data */
-function populate_env(
-    array $data,
-    bool $override = false,
-    bool $populateServer = true,
-): void {
+function populate_env(array $data, bool $override = false): void
+{
     foreach ($data as $key => $value) {
         if (!$override && environment_key_exists($key)) {
             continue;
         }
 
         $_ENV[$key] = $value;
-
-        if ($populateServer) {
-            $_SERVER[$key] = $value;
-        }
     }
 }
 

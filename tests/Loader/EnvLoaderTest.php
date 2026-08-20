@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Componenta\Config\Environment;
 use Componenta\Config\Exception\EnvLoaderException;
 use Componenta\Config\Loader\EnvLoader;
+use Componenta\Config\Loader\EnvLoaderInterface;
 
 function envLoaderRuntime(): string
 {
@@ -23,13 +24,30 @@ function clearEnvLoaderKeys(): void
 beforeEach(function (): void {
     clearEnvLoaderKeys();
     @mkdir(envLoaderRuntime(), 0700, true);
-    foreach (glob(envLoaderRuntime() . '/.*') ?: [] as $file) { if (is_file($file)) { unlink($file); } }
+    foreach (glob(envLoaderRuntime() . '/.*') ?: [] as $file) {
+        if (is_file($file)) {
+            unlink($file);
+        }
+    }
 });
 
 afterEach(function (): void {
     clearEnvLoaderKeys();
-    foreach (glob(envLoaderRuntime() . '/.*') ?: [] as $file) { if (is_file($file)) { unlink($file); } }
+    foreach (glob(envLoaderRuntime() . '/.*') ?: [] as $file) {
+        if (is_file($file)) {
+            unlink($file);
+        }
+    }
     @rmdir(envLoaderRuntime());
+});
+
+it('exposes a non-null runtime environment contract', function (): void {
+    $method = new ReflectionMethod(EnvLoaderInterface::class, 'load');
+
+    expect($method->getReturnType()?->allowsNull())->toBeFalse()
+        ->and((new EnvLoader(envLoaderRuntime()))->load())
+        ->toBeInstanceOf(Environment::class)
+        ->and(method_exists(EnvLoader::class, 'processEnvironment'))->toBeFalse();
 });
 
 it('loads only .env and .env.local by default', function (): void {
@@ -39,12 +57,11 @@ it('loads only .env and .env.local by default', function (): void {
 
     $environment = (new EnvLoader(envLoaderRuntime()))->load();
 
-    expect($environment)->toBeInstanceOf(Environment::class)
-        ->and($environment?->string('APP_ENV'))->toBe('development')
-        ->and($environment?->string('BASE'))->toBe('base')
-        ->and($environment?->string('LOCAL'))->toBe('local')
-        ->and($environment?->string('KEY'))->toBe('local')
-        ->and($environment?->has('IGNORED_SAMPLE'))->toBeFalse();
+    expect($environment->string('APP_ENV'))->toBe('development')
+        ->and($environment->string('BASE'))->toBe('base')
+        ->and($environment->string('LOCAL'))->toBe('local')
+        ->and($environment->string('KEY'))->toBe('local')
+        ->and($environment->has('IGNORED_SAMPLE'))->toBeFalse();
 });
 
 it('keeps deployment environment precedence unless override is requested', function (): void {
@@ -53,11 +70,21 @@ it('keeps deployment environment precedence unless override is requested', funct
 
     $normal = (new EnvLoader(envLoaderRuntime()))->load();
 
-    expect($normal?->string('APP_ENV'))->toBe('process')
-        ->and($normal?->string('FILE_ONLY'))->toBe('file');
+    expect($normal->string('APP_ENV'))->toBe('process')
+        ->and($normal->string('FILE_ONLY'))->toBe('file');
 
     $overridden = (new EnvLoader(envLoaderRuntime()))->load(override: true);
-    expect($overridden?->string('APP_ENV'))->toBe('file');
+    expect($overridden->string('APP_ENV'))->toBe('file');
+});
+
+it('loads dotenv values into env without mirroring them into server globals', function (): void {
+    file_put_contents(envLoaderRuntime() . '/.env', "FILE_ONLY=file\n");
+
+    $environment = (new EnvLoader(envLoaderRuntime()))->load();
+
+    expect($_ENV['FILE_ONLY'])->toBe('file')
+        ->and($_SERVER)->not->toHaveKey('FILE_ONLY')
+        ->and($environment->string('FILE_ONLY'))->toBe('file');
 });
 
 it('keeps read pure and supports an explicit filename list', function (): void {
@@ -77,8 +104,8 @@ it('parses quoted values and escapes predictably', function (): void {
 
     $environment = (new EnvLoader(envLoaderRuntime()))->load();
 
-    expect($environment?->string('MESSAGE'))->toBe('Hello World')
-        ->and($environment?->string('ESCAPED'))->toBe("line1\nline2\ttab");
+    expect($environment->string('MESSAGE'))->toBe('Hello World')
+        ->and($environment->string('ESCAPED'))->toBe("line1\nline2\ttab");
 });
 
 it('validates variable syntax and required variables', function (): void {
@@ -98,7 +125,7 @@ it('allows required values to come from deployment environment', function (): vo
 
     $environment = (new EnvLoader(envLoaderRuntime(), required: ['PROCESS_ONLY']))->load();
 
-    expect($environment?->string('PROCESS_ONLY'))->toBe('present');
+    expect($environment->string('PROCESS_ONLY'))->toBe('present');
 });
 
 it('rejects unsafe filenames and invalid required names', function (): void {
