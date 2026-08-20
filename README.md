@@ -1,8 +1,8 @@
 # Componenta Config
 
-`componenta/config` is the configuration layer used by Componenta DI v5. It provides immutable runtime configuration, environment snapshots, deterministic provider composition, typed reads, dotenv loading, file providers and versioned PHP cache generation for PHP 8.4+.
+`componenta/config` is the configuration runtime used by Componenta DI v5. It targets PHP 8.4+ and provides immutable configuration/environment snapshots, deterministic provider composition, typed reads, explicit lazy values, file providers and versioned persistent application-config cache.
 
-The package has no development/production mode. The application decides whether configuration data comes from providers or a persistent cache; the resulting `Config` and `Environment` semantics are identical.
+There is no compatibility layer for older DI schemas and no development/production mode inside this package. The bootstrap layer decides whether configuration data comes from providers or from a persistent cache.
 
 ## Installation
 
@@ -12,61 +12,50 @@ composer require componenta/config
 
 ## Runtime model
 
-`Config` combines persistent application/package data with exactly one runtime `Environment` snapshot:
+A `Config` always has exactly one `Environment` snapshot:
 
 ```php
 use Componenta\Config\Config;
 use Componenta\Config\Environment;
-use function Componenta\Config\path;
 
 $environment = Environment::fromGlobals();
-
 $config = new Config([
-    'app' => [
-        'name' => 'Example',
-        'debug' => false,
-    ],
+    'app' => ['name' => 'Example'],
 ], $environment);
-
-$name = $config->string(path('app.name'));
-$debug = $config->bool(path('app.debug'));
 ```
 
-When `Config` is created without an explicit environment it receives an empty `Environment`; the property is never nullable.
+`Environment` remains part of the runtime `Config`, but it is never serialized into persistent configuration cache.
 
-Integer and string keys are literal top-level keys. `ConfigPath` performs nested lookup:
+A plain string key is literal. Use `ConfigPath` for nested lookup:
 
 ```php
-$config = new Config([
-    0 => 'first',
-    'database.host' => 'literal',
-    'database' => ['host' => 'localhost'],
-]);
+use function Componenta\Config\path;
 
-$config->get(0);                     // first
-$config->get('database.host');       // literal
-$config->get(path('database.host')); // localhost
+$config->get('database.host');       // literal key
+$config->get(path('database.host')); // nested path
 ```
 
-`Config` is immutable and implements `Countable`, `IteratorAggregate`, read-only `ArrayAccess` and `Componenta\Arrayable\Arrayable`.
+`ConfigPath` must contain one or more non-empty dot-separated segments.
 
-## Typed values
+Integer top-level keys are also supported consistently by `get()`, `has()`, `only()`, `except()`, `ConfigEntry` and read-only `ArrayAccess`.
+
+## Typed reads
 
 ```php
-$host = $config->string(path('database.host'));
-$port = $config->int(path('database.port'), 3306);
-$ratio = $config->float('ratio', 1.0);
-$enabled = $config->bool('enabled', false);
-$drivers = $config->array('drivers', []);
+$config->string('name');
+$config->int('port');
+$config->float('ratio');
+$config->bool('enabled');
+$config->array('hosts');
 ```
 
-Integer conversion is strict: fractional values, exponent-form strings and values outside the platform integer range are rejected instead of being truncated or saturated.
+Integer conversion is lossless: fractional, overflow, scientific integer strings and non-finite values are rejected rather than truncated.
+
+Missing keys throw unless a default is supplied. A stored `null` is an existing value.
 
 ## Defaults and lazy values
 
-A missing key without a default raises `ConfigException`.
-
-Use `ConfigEntry` to resolve a fallback from another configuration key:
+Use `ConfigEntry` when a missing value should resolve another config key:
 
 ```php
 use function Componenta\Config\config_entry;
@@ -91,7 +80,7 @@ $config = new Config([
 ]);
 ```
 
-Lazy results are cached per `Config` or `ContainerValue` context unless `cache: false` is requested.
+Lazy results are cached per `Config` or `ContainerValue` context unless `cache: false` is requested. Persistent config cache preserves `LazyValue` semantics; captured exportable values are inlined so the cached callback is self-contained.
 
 ## Runtime environment
 
@@ -153,55 +142,15 @@ Existing deployment values remain authoritative unless `override: true` is reque
 $environment = (new EnvLoader('.'))->load(override: true);
 ```
 
-`read()` is pure and only parses configured files. `load()` writes dotenv values to `$_ENV`; it does not mirror them into `$_SERVER`. Existing `$_SERVER` and process values are still valid runtime environment sources.
+Dotenv data is written only to `$_ENV`; `$_SERVER` is not mutated. `.env.example`, backup files and other `.env*` files are not loaded implicitly. Alternative basenames must be listed explicitly.
 
-Sample, backup and other `.env*` files are never discovered implicitly. Alternative files must be named explicitly:
+`read()` is pure and does not mutate runtime globals. Required variables may come from dotenv or deployment environment. Parse errors never include dotenv values in diagnostic messages.
 
-```php
-$environment = (new EnvLoader(
-    '.',
-    filenames: ['.env', '.env.production'],
-))->load();
-```
+## Provider composition for DI v5
 
-Required variables may come from dotenv files or the deployment environment:
+`ConfigProvider` transports the dependency schema consumed by DI v5. DI owns semantic validation/canonicalization of factories, aliases, invokables, delegators and extension specifications.
 
-```php
-$environment = (new EnvLoader(
-    '.',
-    required: ['APP_KEY', 'DATABASE_URL'],
-))->load();
-```
-
-## Loading configuration
-
-Compose providers in declaration order:
-
-```php
-use Componenta\Config\ConfigLoader;
-
-$config = ConfigLoader::load(
-    $environment,
-    new AppConfigProvider(),
-    new PackageConfigProvider(),
-);
-```
-
-Providers may return arrays or iterables.
-
-`config_merge()` has deterministic DI-v5-aware composition rules:
-
-- generic string keys merge recursively;
-- generic numeric entries append;
-- `factories`, `aliases`, `services` and `parameter_resolvers` are identity maps and replace the same semantic key atomically;
-- parameter-resolver integer priorities are preserved and never reindexed;
-- `invokables`, `attribute_definitions` and `attribute_capabilities` append in provider order;
-- delegators compose as pipelines;
-- replacement flags are scalar values and the later explicit value wins.
-
-## ConfigProvider and DI v5
-
-`ConfigProvider` exposes exactly the dependency sections consumed by DI v5:
+Available hooks:
 
 ```text
 getFactories()
@@ -216,37 +165,42 @@ shouldReplaceAttributeDefinitions()
 getAttributeCapabilities()
 ```
 
-Application configuration returned by `getConfig()` cannot define the reserved root key `dependencies`.
-
-Config performs only composition-safe shape checks. DI v5 remains the sole owner of semantic validation and canonicalization of factories, aliases, invokables, resolvers and attribute definitions.
-
-### Replacement flags
+`getConfig()` cannot define the reserved root key `dependencies`.
 
 Replacement hooks are tri-state:
 
 ```php
 protected function shouldReplaceParameterResolvers(): ?bool
 {
-    return true;
+    return true; // true/false = explicit value, null = no opinion
 }
 ```
 
-- `null` — this provider does not change an earlier value;
-- `true` — replace the built-in chain;
-- `false` — explicitly cancel an earlier replacement request.
+This prevents an inherited default from accidentally cancelling an earlier provider.
 
-The same contract applies to `shouldReplaceAttributeDefinitions()`.
+### Merge semantics
 
-### Delegators
+At the root `dependencies` section:
 
-A delegator value is always a pipeline list. Callable pairs must be nested as one pipeline entry:
+- `factories`, `aliases`, `services`, `parameter_resolvers` are identity maps; later entries replace the same id/priority atomically;
+- numeric `invokables` append, keyed invokables retain their key for DI v5 canonicalization;
+- `attribute_definitions` and `attribute_capabilities` append;
+- delegator pipelines append;
+- replacement flags are scalar and the later explicit value wins.
+
+Outside `dependencies`, normal recursive configuration merge applies: string keys recurse/replace and numeric keys append.
+
+Malformed non-array dependency roots and malformed delegator pipelines fail before merge can change their shape.
+
+### Delegator pipelines
+
+A delegator callable pair must be an item inside the pipeline:
 
 ```php
 protected function getDelegators(): array
 {
     return [
-        ServiceInterface::class => [
-            LoggingDelegator::class,
+        Service::class => [
             [MetricsDelegator::class, 'decorate'],
         ],
     ];
@@ -265,27 +219,30 @@ use Componenta\Config\FileProvider;
 $data = (new FileProvider('config/*.{php,json}'))();
 ```
 
-Matched files are processed in sorted path order. Unsupported matched files, unreadable files, parse failures and invalid root values fail fast.
+Matched files are processed in sorted path order. JSON integers outside the platform integer range are preserved as exact strings rather than converted to imprecise floats. Unsupported matched files, unreadable files, parse failures and invalid root values fail fast.
 
 Custom formats implement `Componenta\Config\Reader\FileReaderInterface`.
 
-## Persistent cache
+## Persistent application-config cache
 
-Persistent cache contains only application/package config. Runtime environment is never serialized.
+The config cache owns only application/package configuration. It deliberately excludes two runtime/bootstrap concerns:
 
-Build the cache:
+- `Environment` is read at runtime and is never serialized;
+- the reserved `dependencies` root belongs to DI v5 and is stored by `DiCacheGenerator`, not by `ConfigLoader`.
+
+Build the application-config cache:
 
 ```php
 ConfigLoader::export($config, 'var/cache/config.php');
 ```
 
-The cache envelope is versioned:
+The envelope is versioned:
 
 ```php
 return [
     'version' => ConfigLoader::CACHE_VERSION,
     'config' => [
-        // persistent configuration
+        // application/package configuration only
     ],
 ];
 ```
@@ -301,9 +258,9 @@ $config = ConfigLoader::loadFromFile(
 );
 ```
 
-Provider mode and cache mode therefore share the same runtime-environment semantics, and build-time secrets cannot leak through the config cache.
+DI v5 loads its own dependency cache and reattaches normalized dependencies when it builds the final runtime `Config`. Provider mode and cache mode therefore converge on the same runtime shape without serializing build-time environment or duplicating the DI graph.
 
-Unknown cache-envelope keys and stale cache versions fail fast. Cache files are written via a temporary file, flushed, syntax-checked and atomically activated.
+Unknown envelope keys, embedded dependency roots and stale cache versions fail fast. Cache files are written via a temporary file, flushed, syntax-checked and atomically activated.
 
 ## Container helpers
 
@@ -319,6 +276,8 @@ $service = $value->get(ServiceInterface::class);
 $optional = $value->find('optional.service', default: null);
 $clock = $value->find('clock', entry('fallback.clock', ClockInterface::class));
 ```
+
+When `Config` is not passed explicitly, the wrapped DI v5 container must expose `Config::class`; a missing bootstrap config fails fast.
 
 ## Requirements
 

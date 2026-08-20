@@ -3,10 +3,12 @@
 declare(strict_types=1);
 
 use Componenta\Config\Config;
+use Componenta\Config\ConfigKey;
 use Componenta\Config\ConfigLoader;
 use Componenta\Config\ConfigPath;
 use Componenta\Config\Environment;
 use Componenta\Config\Exception\ConfigException;
+use Componenta\Config\LazyValue;
 
 function configLoaderRuntime(): string
 {
@@ -72,7 +74,7 @@ it('rejects invalid provider output', function (): void {
     ))->toThrow(ConfigException::class, 'array or iterable');
 });
 
-it('keeps provider and cache loading behavior identical for the same runtime environment', function (): void {
+it('keeps application config behavior identical between provider and cache loading', function (): void {
     $file = configLoaderRuntime() . '/parity.php';
     $environment = new Environment([
         'APP_ENV' => 'production',
@@ -99,7 +101,54 @@ it('keeps provider and cache loading behavior identical for the same runtime env
         ->and($cachedConfig->environment->string('DATABASE_HOST'))->toBe('runtime-db');
 });
 
-it('exports only persistent config data and binds runtime environment on load', function (): void {
+it('keeps DI dependencies out of the application config cache', function (): void {
+    $file = configLoaderRuntime() . '/without-dependencies.php';
+    $config = new Config([
+        'app' => ['name' => 'Componenta'],
+        ConfigKey::DEPENDENCIES => [
+            ConfigKey::SERVICES => ['runtime.object' => new stdClass()],
+        ],
+    ], new Environment(['APP_ENV' => 'build']));
+
+    ConfigLoader::export($config, $file);
+    $payload = require $file;
+    $loaded = ConfigLoader::loadFromFile($file, new Environment(['APP_ENV' => 'runtime']));
+
+    expect($payload)->toBe([
+        'version' => ConfigLoader::CACHE_VERSION,
+        'config' => ['app' => ['name' => 'Componenta']],
+    ])->and($loaded->toArray())->toBe(['app' => ['name' => 'Componenta']])
+        ->and($loaded->environment->string('APP_ENV'))->toBe('runtime');
+});
+
+it('exports LazyValue and captured closure values as self-contained persistent config', function (): void {
+    $file = configLoaderRuntime() . '/lazy.php';
+    $prefix = 'dsn:';
+    $buildEnvironment = new Environment(['DATABASE_HOST' => 'build-db']);
+    $config = new Config([
+        'dsn' => new LazyValue(
+            static fn($runtimeConfig): string => $prefix . $runtimeConfig->environment->string('DATABASE_HOST'),
+        ),
+        'uncached' => new LazyValue(
+            static fn($runtimeConfig): string => $runtimeConfig->environment->string('DATABASE_HOST'),
+            cache: false,
+        ),
+        'plain_callback' => static fn(): string => $prefix . 'plain',
+    ], $buildEnvironment);
+
+    ConfigLoader::export($config, $file);
+    $loaded = ConfigLoader::loadFromFile(
+        $file,
+        new Environment(['DATABASE_HOST' => 'runtime-db']),
+    );
+
+    expect($loaded->string('dsn'))->toBe('dsn:runtime-db')
+        ->and($loaded->get('uncached'))->toBeInstanceOf(LazyValue::class)
+        ->and($loaded->get('uncached')->cache)->toBeFalse()
+        ->and(($loaded->get('plain_callback'))())->toBe('dsn:plain');
+});
+
+it('never serializes build-time environment values', function (): void {
     $file = configLoaderRuntime() . '/nested/config.php';
     $buildEnvironment = new Environment([
         'APP_ENV' => 'build',
@@ -122,8 +171,7 @@ it('exports only persistent config data and binds runtime environment on load', 
     expect($payload)->toBe([
         'version' => ConfigLoader::CACHE_VERSION,
         'config' => $original->toArray(),
-    ])->and($loaded->toArray())->toBe($original->toArray())
-        ->and($loaded->environment)->toBe($runtimeEnvironment)
+    ])->and($loaded->environment)->toBe($runtimeEnvironment)
         ->and($loaded->environment->string('DATABASE_PASSWORD'))->toBe('runtime-secret');
 });
 
@@ -137,7 +185,7 @@ it('can replace an existing cache snapshot', function (): void {
     expect(ConfigLoader::loadFromFile($file, $environment)->int('version'))->toBe(2);
 });
 
-it('rejects unsupported cache envelopes and versions', function (): void {
+it('rejects unsupported cache envelopes versions and embedded DI roots', function (): void {
     $environment = new Environment([]);
 
     $missing = configLoaderRuntime() . '/missing.php';
@@ -154,7 +202,7 @@ it('rejects unsupported cache envelopes and versions', function (): void {
         ->toThrow(ConfigException::class, 'Unsupported configuration cache envelope key');
 
     $stale = configLoaderRuntime() . '/stale.php';
-    file_put_contents($stale, "<?php return ['version' => 0, 'config' => []];");
+    file_put_contents($stale, "<?php return ['version' => 1, 'config' => []];");
     expect(fn() => ConfigLoader::loadFromFile($stale, $environment))
         ->toThrow(ConfigException::class, 'Unsupported configuration cache version');
 
@@ -166,4 +214,14 @@ it('rejects unsupported cache envelopes and versions', function (): void {
     );
     expect(fn() => ConfigLoader::loadFromFile($invalid, $environment))
         ->toThrow(ConfigException::class, '"config" entry must be an array');
+
+    $diRoot = configLoaderRuntime() . '/di-root.php';
+    file_put_contents(
+        $diRoot,
+        '<?php return ['
+        . "'version' => " . ConfigLoader::CACHE_VERSION
+        . ", 'config' => ['dependencies' => []]];",
+    );
+    expect(fn() => ConfigLoader::loadFromFile($diRoot, $environment))
+        ->toThrow(ConfigException::class, 'must not contain reserved DI root');
 });

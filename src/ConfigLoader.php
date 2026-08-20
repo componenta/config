@@ -5,17 +5,20 @@ declare(strict_types=1);
 namespace Componenta\Config;
 
 use Componenta\Config\Exception\ConfigException;
+use Componenta\Config\Internal\ConfigCacheObjectExporter;
+use Componenta\VarExport\Config\ClosureUseMode;
 use Componenta\VarExport\Config\ExportConfig;
-use Componenta\VarExport\Export;
+use Componenta\VarExport\VarExporter;
 use Throwable;
 
 /**
- * Builds runtime Config snapshots and persists application configuration data.
- * Environment is runtime-only and is never written to the persistent cache.
+ * Builds runtime Config snapshots and persists application/package config data.
+ * Environment and DI dependencies are runtime/bootstrap concerns and are never
+ * written to this cache.
  */
 final class ConfigLoader
 {
-    public const int CACHE_VERSION = 1;
+    public const int CACHE_VERSION = 2;
 
     /** @var array<string, true> */
     private const array CACHE_KEYS = [
@@ -57,9 +60,12 @@ final class ConfigLoader
 
     public static function export(Config $config, string $filename): void
     {
+        $persistent = $config->toArray();
+        unset($persistent[ConfigKey::DEPENDENCIES]);
+
         self::exportToFile($filename, [
             'version' => self::CACHE_VERSION,
-            'config' => $config->toArray(),
+            'config' => $persistent,
         ]);
     }
 
@@ -88,6 +94,14 @@ final class ConfigLoader
 
         /** @var array<array-key, mixed> $config */
         $config = $cache['config'];
+
+        if (array_key_exists(ConfigKey::DEPENDENCIES, $config)) {
+            throw new ConfigException(sprintf(
+                'Configuration cache must not contain reserved DI root "%s".',
+                ConfigKey::DEPENDENCIES,
+            ));
+        }
+
         return $config;
     }
 
@@ -109,10 +123,13 @@ final class ConfigLoader
                 ));
             }
 
-            $exported = Export::pretty(
-                $data,
-                ExportConfig::pretty()->withTrailingComma(),
-            );
+            $exportConfig = ExportConfig::pretty()
+                ->withTrailingComma()
+                ->withClosureUseMode(ClosureUseMode::Inline);
+            $exported = (new VarExporter(
+                $exportConfig,
+                objectExporter: new ConfigCacheObjectExporter($exportConfig),
+            ))->export($data);
 
             $content = "<?php\n\ndeclare(strict_types=1);\n\nreturn {$exported};\n";
             $temporary = self::temporaryPath($filename);
