@@ -12,9 +12,16 @@ function fileProviderRuntime(): string
     return $root ??= sys_get_temp_dir() . '/componenta_file_provider_' . bin2hex(random_bytes(5));
 }
 
-beforeEach(function (): void { @mkdir(fileProviderRuntime(), 0700, true); });
+beforeEach(function (): void {
+    @mkdir(fileProviderRuntime(), 0700, true);
+});
+
 afterEach(function (): void {
-    foreach (glob(fileProviderRuntime() . '/*') ?: [] as $file) { is_file($file) && unlink($file); }
+    foreach (glob(fileProviderRuntime() . '/*') ?: [] as $file) {
+        if (is_file($file)) {
+            unlink($file);
+        }
+    }
     @rmdir(fileProviderRuntime());
 });
 
@@ -31,6 +38,17 @@ it('loads PHP and JSON files in sorted order and merges them', function (): void
         'app' => ['name' => 'Componenta', 'debug' => true],
         'list' => ['a', 'b'],
     ]);
+});
+
+it('preserves JSON integers beyond the platform range without precision loss', function (): void {
+    $bigInteger = PHP_INT_MAX . '0';
+    file_put_contents(
+        fileProviderRuntime() . '/big.json',
+        '{"id":' . $bigInteger . '}',
+    );
+
+    expect((new FileProvider(fileProviderRuntime() . '/*.json'))())
+        ->toBe(['id' => $bigInteger]);
 });
 
 it('fails when a PHP config does not return an array', function (): void {

@@ -31,7 +31,12 @@ final class JsonFileReader implements FileReaderInterface
         }
 
         try {
-            $data = json_decode($content, true, 512, JSON_THROW_ON_ERROR);
+            $data = json_decode(
+                $content,
+                true,
+                512,
+                JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING,
+            );
         } catch (JsonException $e) {
             throw new ConfigException(
                 sprintf('Failed to parse JSON configuration file "%s": %s', $file, $e->getMessage()),
