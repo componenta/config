@@ -175,12 +175,20 @@ final class EnvLoader implements EnvLoaderInterface
 
             $pos = strpos($line, '=');
             if ($pos === false) {
-                throw EnvLoaderException::parseError($filePath, $lineNumber + 1, $line);
+                throw EnvLoaderException::parseError(
+                    $filePath,
+                    $lineNumber + 1,
+                    'expected KEY=VALUE assignment',
+                );
             }
 
             $key = trim(substr($line, 0, $pos));
             if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $key) !== 1) {
-                throw EnvLoaderException::parseError($filePath, $lineNumber + 1, $line);
+                throw EnvLoaderException::parseError(
+                    $filePath,
+                    $lineNumber + 1,
+                    'invalid variable name',
+                );
             }
 
             $vars[$key] = $this->parseValue(
