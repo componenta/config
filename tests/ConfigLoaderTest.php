@@ -72,6 +72,33 @@ it('rejects invalid provider output', function (): void {
     ))->toThrow(ConfigException::class, 'array or iterable');
 });
 
+it('keeps provider and cache loading behavior identical for the same runtime environment', function (): void {
+    $file = configLoaderRuntime() . '/parity.php';
+    $environment = new Environment([
+        'APP_ENV' => 'production',
+        'DATABASE_HOST' => 'runtime-db',
+    ]);
+
+    $providerConfig = ConfigLoader::load(
+        $environment,
+        static fn(): array => [
+            'app' => ['name' => 'Componenta'],
+            'database' => ['port' => '3306'],
+        ],
+    );
+
+    ConfigLoader::export($providerConfig, $file);
+    $cachedConfig = ConfigLoader::loadFromFile($file, $environment);
+
+    expect($cachedConfig->toArray())->toBe($providerConfig->toArray())
+        ->and($cachedConfig->environment)->toBe($providerConfig->environment)
+        ->and($cachedConfig->string(new ConfigPath('app.name')))
+        ->toBe($providerConfig->string(new ConfigPath('app.name')))
+        ->and($cachedConfig->int(new ConfigPath('database.port')))
+        ->toBe($providerConfig->int(new ConfigPath('database.port')))
+        ->and($cachedConfig->environment->string('DATABASE_HOST'))->toBe('runtime-db');
+});
+
 it('exports only persistent config data and binds runtime environment on load', function (): void {
     $file = configLoaderRuntime() . '/nested/config.php';
     $buildEnvironment = new Environment([
@@ -95,8 +122,7 @@ it('exports only persistent config data and binds runtime environment on load', 
     expect($payload)->toBe([
         'version' => ConfigLoader::CACHE_VERSION,
         'config' => $original->toArray(),
-    ])->and($payload)->not->toHaveKey('environment')
-        ->and($loaded->toArray())->toBe($original->toArray())
+    ])->and($loaded->toArray())->toBe($original->toArray())
         ->and($loaded->environment)->toBe($runtimeEnvironment)
         ->and($loaded->environment->string('DATABASE_PASSWORD'))->toBe('runtime-secret');
 });
@@ -111,16 +137,20 @@ it('can replace an existing cache snapshot', function (): void {
     expect(ConfigLoader::loadFromFile($file, $environment)->int('version'))->toBe(2);
 });
 
-it('rejects stale legacy and malformed cache envelopes', function (): void {
+it('rejects unsupported cache envelopes and versions', function (): void {
     $environment = new Environment([]);
 
     $missing = configLoaderRuntime() . '/missing.php';
     expect(fn() => ConfigLoader::loadFromFile($missing, $environment))
         ->toThrow(ConfigException::class, 'not readable');
 
-    $legacy = configLoaderRuntime() . '/legacy.php';
-    file_put_contents($legacy, "<?php return ['config' => [], 'environment' => []];");
-    expect(fn() => ConfigLoader::loadFromFile($legacy, $environment))
+    $unsupported = configLoaderRuntime() . '/unsupported.php';
+    file_put_contents(
+        $unsupported,
+        "<?php return ['version' => " . ConfigLoader::CACHE_VERSION
+        . ", 'config' => [], 'metadata' => []];",
+    );
+    expect(fn() => ConfigLoader::loadFromFile($unsupported, $environment))
         ->toThrow(ConfigException::class, 'Unsupported configuration cache envelope key');
 
     $stale = configLoaderRuntime() . '/stale.php';

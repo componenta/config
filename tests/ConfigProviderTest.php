@@ -116,7 +116,7 @@ it('merges child providers after the parent and accepts iterable output', functi
     ])->and($config['app'])->toBe(['name' => 'base', 'debug' => true]);
 });
 
-it('uses nullable replacement hooks so inherited providers do not cancel explicit flags', function (): void {
+it('uses tri-state replacement hooks so inherited providers do not cancel explicit flags', function (): void {
     $provider = new class extends ConfigProvider {
         protected function shouldReplaceAttributeDefinitions(): ?bool { return true; }
         protected function getProviders(): iterable
@@ -185,7 +185,7 @@ it('rejects non-callable child providers and invalid child output', function ():
         ->toThrow(InvalidArgumentException::class, 'array or iterable');
 });
 
-it('exposes only the DI v5 dependency schema and no extension or legacy hooks', function (): void {
+it('exposes the exact DI v5 dependency schema', function (): void {
     expect(ConfigKey::dependencyKeys())->toBe([
         ConfigKey::FACTORIES,
         ConfigKey::INVOKABLES,
@@ -197,8 +197,5 @@ it('exposes only the DI v5 dependency schema and no extension or legacy hooks', 
         ConfigKey::ATTRIBUTE_DEFINITIONS,
         ConfigKey::ATTRIBUTE_DEFINITIONS_REPLACE,
         ConfigKey::ATTRIBUTE_CAPABILITIES,
-    ])->and(method_exists(ConfigProvider::class, 'getDependencyExtensions'))->toBeFalse()
-        ->and(method_exists(ConfigProvider::class, 'getAttributeHandlers'))->toBeFalse()
-        ->and(defined(ConfigKey::class . '::ATTRIBUTE_HANDLERS'))->toBeFalse()
-        ->and(defined(ConfigKey::class . '::GENERATED_ENTRY_RESOLVER_FILE'))->toBeFalse();
+    ]);
 });

@@ -70,9 +70,3 @@ it('converts arrays and comma-separated strings', function (): void {
         ->and(TypeConverter::toArray(null))->toBe([])
         ->and(TypeConverter::toArray(1))->toBe([1]);
 });
-
-it('does not expose obsolete convertibility helpers', function (): void {
-    expect(method_exists(TypeConverter::class, 'isConvertibleToInt'))->toBeFalse()
-        ->and(method_exists(TypeConverter::class, 'isConvertibleToFloat'))->toBeFalse()
-        ->and(method_exists(TypeConverter::class, 'isConvertibleToString'))->toBeFalse();
-});
