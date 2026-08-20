@@ -155,6 +155,13 @@ it('is read-only through ArrayAccess and supports integer offsets', function ():
         ->toThrow(RuntimeException::class, 'immutable');
 });
 
+it('rejects unsupported ArrayAccess offsets', function (): void {
+    $config = new Config(['key' => 'value']);
+
+    expect(fn() => $config[new stdClass()])
+        ->toThrow(InvalidArgumentException::class, 'Config offset must be');
+});
+
 it('iterates and counts top-level entries', function (): void {
     $config = new Config(['a' => 1, 'b' => 2]);
 

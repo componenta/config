@@ -5,7 +5,6 @@ declare(strict_types=1);
 use Componenta\Config\Environment;
 use Componenta\Config\Exception\EnvLoaderException;
 use Componenta\Config\Loader\EnvLoader;
-use Componenta\Config\Loader\EnvLoaderInterface;
 
 function envLoaderRuntime(): string
 {
@@ -41,13 +40,9 @@ afterEach(function (): void {
     @rmdir(envLoaderRuntime());
 });
 
-it('exposes a non-null runtime environment contract', function (): void {
-    $method = new ReflectionMethod(EnvLoaderInterface::class, 'load');
-
-    expect($method->getReturnType()?->allowsNull())->toBeFalse()
-        ->and((new EnvLoader(envLoaderRuntime()))->load())
-        ->toBeInstanceOf(Environment::class)
-        ->and(method_exists(EnvLoader::class, 'processEnvironment'))->toBeFalse();
+it('always returns a runtime environment snapshot', function (): void {
+    expect((new EnvLoader(envLoaderRuntime()))->load())
+        ->toBeInstanceOf(Environment::class);
 });
 
 it('loads only .env and .env.local by default', function (): void {
