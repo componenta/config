@@ -41,10 +41,23 @@ function withTemporaryEnv(string $key, mixed $value, Closure $test): void
     try {
         $test();
     } finally {
-        if ($hadEnv) { $_ENV[$key] = $oldEnv; } else { unset($_ENV[$key]); }
-        if ($hadServer) { $_SERVER[$key] = $oldServer; } else { unset($_SERVER[$key]); }
+        if ($hadEnv) {
+            $_ENV[$key] = $oldEnv;
+        } else {
+            unset($_ENV[$key]);
+        }
 
-        if ($oldNative === false) { putenv($key); } else { putenv($key . '=' . $oldNative); }
+        if ($hadServer) {
+            $_SERVER[$key] = $oldServer;
+        } else {
+            unset($_SERVER[$key]);
+        }
+
+        if ($oldNative === false) {
+            putenv($key);
+        } else {
+            putenv($key . '=' . $oldNative);
+        }
     }
 }
 
@@ -59,15 +72,30 @@ it('resolves Config from a PSR container and validates its type', function (): v
     $expected = new Config(['app' => 'test']);
     $container = new class ($expected) implements ContainerInterface {
         public function __construct(private readonly mixed $value) {}
-        public function get(string $id): mixed { return $this->value; }
-        public function has(string $id): bool { return true; }
+
+        public function get(string $id): mixed
+        {
+            return $this->value;
+        }
+
+        public function has(string $id): bool
+        {
+            return true;
+        }
     };
 
     expect(config($container))->toBe($expected);
 
     $invalid = new class implements ContainerInterface {
-        public function get(string $id): mixed { return new stdClass(); }
-        public function has(string $id): bool { return true; }
+        public function get(string $id): mixed
+        {
+            return new stdClass();
+        }
+
+        public function has(string $id): bool
+        {
+            return true;
+        }
     };
 
     expect(fn() => config($invalid))->toThrow(ConfigException::class, 'must be an instance');
@@ -89,8 +117,26 @@ it('reads and normalizes environment helper values', function (): void {
         expect(env_bool('COMPONENTA_CONFIG_BOOL'))->toBeTrue();
     });
 
+    withTemporaryEnv('COMPONENTA_CONFIG_FALSE_STRING', 'false', function (): void {
+        expect(env('COMPONENTA_CONFIG_FALSE_STRING'))->toBeFalse()
+            ->and(env_string('COMPONENTA_CONFIG_FALSE_STRING'))->toBe('false');
+    });
+
     withTemporaryEnv('COMPONENTA_CONFIG_ARRAY', 'redis, file', function (): void {
         expect(env_array('COMPONENTA_CONFIG_ARRAY'))->toBe(['redis', 'file']);
+    });
+});
+
+it('typed environment helpers convert the raw value without generic inference', function (): void {
+    withTemporaryEnv('COMPONENTA_CONFIG_TRUE_STRING', 'true', function (): void {
+        expect(env_string('COMPONENTA_CONFIG_TRUE_STRING'))->toBe('true')
+            ->and(fn() => env_int('COMPONENTA_CONFIG_TRUE_STRING'))
+            ->toThrow(ConfigException::class, 'to int');
+    });
+
+    withTemporaryEnv('COMPONENTA_CONFIG_ONE_STRING', '1', function (): void {
+        expect(env_string('COMPONENTA_CONFIG_ONE_STRING'))->toBe('1')
+            ->and(env_bool('COMPONENTA_CONFIG_ONE_STRING'))->toBeTrue();
     });
 });
 

@@ -89,7 +89,17 @@ function env_string(
     string $key,
     string|DefaultValue $default = DefaultValue::None,
 ): string {
-    $value = env($key, $default);
+    $found = false;
+    $value = raw_env_value($key, $found);
+
+    if (!$found) {
+        if ($default === DefaultValue::None) {
+            throw ConfigException::missingKey($key);
+        }
+
+        return $default;
+    }
+
     $result = TypeConverter::toString($value);
 
     if ($result === null) {
@@ -106,7 +116,17 @@ function env_int(
     string $key,
     int|DefaultValue $default = DefaultValue::None,
 ): int {
-    $value = env($key, $default);
+    $found = false;
+    $value = raw_env_value($key, $found);
+
+    if (!$found) {
+        if ($default === DefaultValue::None) {
+            throw ConfigException::missingKey($key);
+        }
+
+        return $default;
+    }
+
     $result = TypeConverter::toInt($value);
 
     if ($result === null) {
@@ -123,7 +143,17 @@ function env_float(
     string $key,
     float|DefaultValue $default = DefaultValue::None,
 ): float {
-    $value = env($key, $default);
+    $found = false;
+    $value = raw_env_value($key, $found);
+
+    if (!$found) {
+        if ($default === DefaultValue::None) {
+            throw ConfigException::missingKey($key);
+        }
+
+        return $default;
+    }
+
     $result = TypeConverter::toFloat($value);
 
     if ($result === null) {
@@ -140,7 +170,17 @@ function env_bool(
     string $key,
     bool|DefaultValue $default = DefaultValue::None,
 ): bool {
-    $value = env($key, $default);
+    $found = false;
+    $value = raw_env_value($key, $found);
+
+    if (!$found) {
+        if ($default === DefaultValue::None) {
+            throw ConfigException::missingKey($key);
+        }
+
+        return $default;
+    }
+
     $result = TypeConverter::toBool($value);
 
     if ($result === null) {
@@ -176,7 +216,7 @@ function config_merge(array $base, array $override): array
     return ConfigMerger::merge($base, $override);
 }
 
-/** @internal @param array<string, string> $data */
+/** @internal @param array<string, mixed> $data */
 function populate_env(
     array $data,
     bool $override = false,

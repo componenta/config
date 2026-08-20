@@ -49,7 +49,7 @@ final class ConfigLoader
             }
 
             if ($populateEnv && $environmentData !== null) {
-                /** @var array<string, string> $environmentData */
+                /** @var array<string, mixed> $environmentData */
                 populate_env($environmentData);
             }
 
@@ -112,11 +112,30 @@ final class ConfigLoader
                 if (!fflush($stream)) {
                     throw new \RuntimeException('Cannot flush temporary cache file.');
                 }
+
+                if (function_exists('fsync') && !fsync($stream)) {
+                    throw new \RuntimeException('Cannot synchronise temporary cache file.');
+                }
             } finally {
                 fclose($stream);
             }
 
-            if (!rename($temporary, $filename)) {
+            self::lint($temporary);
+
+            $wasOpcodeCached = is_file($filename)
+                && function_exists('opcache_is_script_cached')
+                && @opcache_is_script_cached($filename);
+
+            if ($wasOpcodeCached
+                && (!function_exists('opcache_invalidate') || !@opcache_invalidate($filename, true))
+            ) {
+                throw new \RuntimeException(sprintf(
+                    'Cannot replace cached configuration "%s" because its OPcache entry could not be invalidated.',
+                    $filename,
+                ));
+            }
+
+            if (!@rename($temporary, $filename)) {
                 throw new \RuntimeException('Cannot activate configuration cache file.');
             }
 
@@ -137,6 +156,56 @@ final class ConfigLoader
             throw new ConfigException(
                 'Failed to export configuration: ' . $e->getMessage(),
                 previous: $e,
+            );
+        }
+    }
+
+    private static function lint(string $file): void
+    {
+        if (!function_exists('proc_open')) {
+            throw new ConfigException(
+                'Configuration cache cannot be validated because proc_open() is unavailable.',
+            );
+        }
+
+        $pipes = [];
+        $process = @proc_open(
+            [PHP_BINARY, '-n', '-d', 'memory_limit=-1', '-l', $file],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+            options: ['bypass_shell' => true],
+        );
+
+        $stdin = $pipes[0] ?? null;
+        $stdoutPipe = $pipes[1] ?? null;
+        $stderrPipe = $pipes[2] ?? null;
+
+        if (!is_resource($process)
+            || !is_resource($stdin)
+            || !is_resource($stdoutPipe)
+            || !is_resource($stderrPipe)
+        ) {
+            throw new ConfigException(
+                'Cannot start PHP syntax validation for a configuration cache artifact.',
+            );
+        }
+
+        @fclose($stdin);
+        $stdout = @stream_get_contents($stdoutPipe);
+        $stderr = @stream_get_contents($stderrPipe);
+        @fclose($stdoutPipe);
+        @fclose($stderrPipe);
+        $status = @proc_close($process);
+
+        if ($status !== 0) {
+            $output = trim(
+                (is_string($stdout) ? $stdout : '')
+                . "\n"
+                . (is_string($stderr) ? $stderr : ''),
+            );
+
+            throw new ConfigException(
+                "Configuration cache failed PHP syntax validation:\n" . $output,
             );
         }
     }

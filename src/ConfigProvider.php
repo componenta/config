@@ -10,18 +10,19 @@ use ReflectionMethod;
 /**
  * Base provider for application and dependency configuration.
  *
- * Override only the sections your package owns. Child providers are merged in
- * declaration order, so later providers may replace scalar/map values while
- * list-like dependency sections are appended.
+ * Override only the sections your package owns. Child providers are evaluated
+ * when the provider is invoked and merged in declaration order, so provider
+ * subclasses remain free to use ordinary constructors for their own state.
  */
 class ConfigProvider
 {
-    /** @var list<callable(): array<array-key, mixed>> */
-    private readonly array $childProviders;
-
-    final public function __construct()
+    /** @return array<array-key, mixed> */
+    public function __invoke(): array
     {
-        $providers = [];
+        $config = [
+            ConfigKey::DEPENDENCIES => $this->getDependencies(),
+            ...$this->getConfig(),
+        ];
 
         foreach ($this->getProviders() as $provider) {
             if (!is_callable($provider)) {
@@ -31,28 +32,17 @@ class ConfigProvider
                 ));
             }
 
-            $providers[] = $provider;
-        }
-
-        $this->childProviders = $providers;
-    }
-
-    /** @return array<array-key, mixed> */
-    public function __invoke(): array
-    {
-        $config = [
-            ConfigKey::DEPENDENCIES => $this->getDependencies(),
-            ...$this->getConfig(),
-        ];
-
-        foreach ($this->childProviders as $provider) {
             $child = $provider();
 
             if (!is_array($child)) {
-                throw new InvalidArgumentException(sprintf(
-                    'Child configuration provider must return an array; got %s.',
-                    get_debug_type($child),
-                ));
+                if (!is_iterable($child)) {
+                    throw new InvalidArgumentException(sprintf(
+                        'Child configuration provider must return an array or iterable; got %s.',
+                        get_debug_type($child),
+                    ));
+                }
+
+                $child = iterator_to_array($child);
             }
 
             if ($child !== []) {
@@ -63,7 +53,7 @@ class ConfigProvider
         return $config;
     }
 
-    /** @return iterable<callable(): array<array-key, mixed>> */
+    /** @return iterable<callable(): iterable<array-key, mixed>> */
     protected function getProviders(): iterable
     {
         return [];
