@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Componenta\Config;
 
+use Componenta\Config\Exception\ConfigException;
 use Componenta\Config\Exception\InvalidContainerValueException;
 use Psr\Container\ContainerInterface;
 
@@ -69,7 +70,10 @@ final readonly class ContainerValue implements ContainerInterface
     private function resolveConfig(): Config
     {
         if (!$this->value->has(Config::class)) {
-            return new Config([]);
+            throw new ConfigException(sprintf(
+                'Wrapped container must expose "%s" or Config must be provided explicitly.',
+                Config::class,
+            ));
         }
 
         return $this->get(Config::class, Config::class);

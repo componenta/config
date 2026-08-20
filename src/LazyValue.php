@@ -16,7 +16,7 @@ use WeakMap;
  */
 final class LazyValue
 {
-    public Closure $callback;
+    private readonly Closure $callback;
 
     /** @var WeakMap<object, array{mixed}>|null */
     private ?WeakMap $values = null;
