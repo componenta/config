@@ -5,6 +5,14 @@ declare(strict_types=1);
 use Componenta\Config\ConfigKey;
 use Componenta\Config\ConfigProvider;
 
+final class ConfigProviderCallablePairFixture
+{
+    public static function decorate(string $value): string
+    {
+        return $value;
+    }
+}
+
 it('returns an empty dependency section for the base provider', function (): void {
     expect((new ConfigProvider())())->toBe([ConfigKey::DEPENDENCIES => []]);
 });
@@ -14,7 +22,10 @@ it('transports the DI v5 dependency schema without reimplementing DI normalizati
         protected function getFactories(): array { return ['service' => 'Factory']; }
         protected function getInvokables(): array { return ['Service', 'alias' => 'AliasedService']; }
         protected function getAliases(): array { return ['explicit' => 'ExplicitService']; }
-        protected function getDelegators(): array { return ['service' => [['Decorator', 'decorate']]]; }
+        protected function getDelegators(): array
+        {
+            return ['service' => [[ConfigProviderCallablePairFixture::class, 'decorate']]];
+        }
         protected function getServices(): array { return ['ready' => new stdClass()]; }
         protected function getParameterResolvers(): array { return [900 => 'Resolver']; }
         protected function shouldReplaceParameterResolvers(): ?bool { return true; }
@@ -31,13 +42,27 @@ it('transports the DI v5 dependency schema without reimplementing DI normalizati
             'alias' => 'AliasedService',
         ])->and($dependencies[ConfigKey::ALIASES])->toBe(['explicit' => 'ExplicitService'])
         ->and($dependencies[ConfigKey::DELEGATORS])->toBe([
-            'service' => [['Decorator', 'decorate']],
+            'service' => [[ConfigProviderCallablePairFixture::class, 'decorate']],
         ])->and($dependencies[ConfigKey::PARAMETER_RESOLVERS])->toBe([900 => 'Resolver'])
         ->and($dependencies[ConfigKey::PARAMETER_RESOLVERS_REPLACE])->toBeTrue()
         ->and($dependencies[ConfigKey::ATTRIBUTE_DEFINITIONS])->toBe(['Definition'])
         ->and($dependencies[ConfigKey::ATTRIBUTE_DEFINITIONS_REPLACE])->toBeFalse()
         ->and($dependencies[ConfigKey::ATTRIBUTE_CAPABILITIES])->toBe(['Capability'])
         ->and($dependencies[ConfigKey::SERVICES]['ready'])->toBeInstanceOf(stdClass::class);
+});
+
+it('rejects direct callable-pair delegators even without child providers', function (): void {
+    $provider = new class extends ConfigProvider {
+        protected function getDelegators(): array
+        {
+            return [
+                'service' => [ConfigProviderCallablePairFixture::class, 'decorate'],
+            ];
+        }
+    };
+
+    expect($provider(...))
+        ->toThrow(InvalidArgumentException::class, 'callable pairs must be nested');
 });
 
 it('leaves alias compatibility to DI v5 canonicalization', function (): void {

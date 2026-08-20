@@ -8,6 +8,14 @@ use Componenta\Config\Environment;
 
 use function Componenta\Config\config_merge;
 
+final class ConfigCompositionCallablePairFixture
+{
+    public static function decorate(string $value): string
+    {
+        return $value;
+    }
+}
+
 it('preserves parameter resolver priorities across providers', function (): void {
     $config = ConfigLoader::load(
         new Environment([]),
@@ -71,7 +79,7 @@ it('appends list-like dependency sections and nested delegator callable pairs', 
         [ConfigKey::DEPENDENCIES => [
             ConfigKey::INVOKABLES => ['ServiceA'],
             ConfigKey::DELEGATORS => [
-                'service' => [['DecoratorA', 'decorate']],
+                'service' => [[ConfigCompositionCallablePairFixture::class, 'decorate']],
             ],
             ConfigKey::ATTRIBUTE_DEFINITIONS => ['DefinitionA'],
             ConfigKey::ATTRIBUTE_CAPABILITIES => ['CapabilityA'],
@@ -90,10 +98,30 @@ it('appends list-like dependency sections and nested delegator callable pairs', 
 
     expect($dependencies[ConfigKey::INVOKABLES])->toBe(['ServiceA', 'ServiceB'])
         ->and($dependencies[ConfigKey::DELEGATORS]['service'])->toBe([
-            ['DecoratorA', 'decorate'],
+            [ConfigCompositionCallablePairFixture::class, 'decorate'],
             ['DecoratorB', 'decorate'],
         ])->and($dependencies[ConfigKey::ATTRIBUTE_DEFINITIONS])->toBe(['DefinitionA', 'DefinitionB'])
         ->and($dependencies[ConfigKey::ATTRIBUTE_CAPABILITIES])->toBe(['CapabilityA', 'CapabilityB']);
+});
+
+it('rejects a direct callable pair because its meaning would change after composition', function (): void {
+    expect(fn() => config_merge([], [
+        ConfigKey::DEPENDENCIES => [
+            ConfigKey::DELEGATORS => [
+                'service' => [ConfigCompositionCallablePairFixture::class, 'decorate'],
+            ],
+        ],
+    ]))->toThrow(InvalidArgumentException::class, 'callable pairs must be nested');
+});
+
+it('rejects non-list delegator pipelines before merge can mutate their shape', function (): void {
+    expect(fn() => config_merge([], [
+        ConfigKey::DEPENDENCIES => [
+            ConfigKey::DELEGATORS => [
+                'service' => ['first' => 'DecoratorA'],
+            ],
+        ],
+    ]))->toThrow(InvalidArgumentException::class, 'pipeline list');
 });
 
 it('preserves keyed invokables until DI v5 canonicalization', function (): void {

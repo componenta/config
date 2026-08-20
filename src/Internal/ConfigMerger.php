@@ -5,14 +5,14 @@ declare(strict_types=1);
 namespace Componenta\Config\Internal;
 
 use Componenta\Config\ConfigKey;
+use InvalidArgumentException;
 
 /**
  * Deterministic configuration composition.
  *
  * Generic arrays merge recursively by string key and append numeric entries.
- * The root dependency section additionally treats maps whose keys carry
- * semantic identity as atomic maps, so later providers replace one entry
- * without recursively merging its value.
+ * The DI v5 dependency root additionally preserves semantic map keys and
+ * rejects shapes that cannot be composed without changing their meaning.
  *
  * @internal
  */
@@ -28,6 +28,9 @@ final class ConfigMerger
 
     public static function merge(array $base, array $override): array
     {
+        self::assertMergeableDependencies($base);
+        self::assertMergeableDependencies($override);
+
         return self::mergeArray($base, $override, root: true);
     }
 
@@ -88,6 +91,62 @@ final class ConfigMerger
         }
 
         return $base;
+    }
+
+    /** @param array<array-key, mixed> $config */
+    private static function assertMergeableDependencies(array $config): void
+    {
+        $dependencies = $config[ConfigKey::DEPENDENCIES] ?? null;
+        if (!is_array($dependencies)) {
+            return;
+        }
+
+        $delegators = $dependencies[ConfigKey::DELEGATORS] ?? null;
+        if ($delegators === null || !is_array($delegators)) {
+            return;
+        }
+
+        foreach ($delegators as $id => $pipeline) {
+            if (!is_string($id) || $id === '') {
+                throw new InvalidArgumentException(
+                    'Delegator service ids must be non-empty strings.',
+                );
+            }
+
+            if (!is_array($pipeline) || !array_is_list($pipeline)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Delegators for "%s" must be configured as a pipeline list.',
+                    $id,
+                ));
+            }
+
+            if (self::isCallablePair($pipeline)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Delegators for "%s" must be configured as a pipeline list; callable pairs must be nested as one pipeline entry.',
+                    $id,
+                ));
+            }
+        }
+    }
+
+    /** @phpstan-assert-if-true array{object|string, non-empty-string} $value */
+    private static function isCallablePair(array $value): bool
+    {
+        if (array_keys($value) !== [0, 1]
+            || !is_string($value[1])
+            || $value[1] === ''
+        ) {
+            return false;
+        }
+
+        if (is_callable($value)) {
+            return true;
+        }
+
+        return is_string($value[0])
+            && $value[0] !== ''
+            && (class_exists($value[0]) || interface_exists($value[0]))
+            && method_exists($value[0], $value[1]);
     }
 
     private function __construct() {}

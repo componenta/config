@@ -9,8 +9,8 @@ use InvalidArgumentException;
 /**
  * Base provider for the dependency schema consumed by Componenta DI v5.
  *
- * The provider composes data; DI owns validation and canonicalization of
- * factories, invokables, aliases, delegators and extension specifications.
+ * Config enforces only composition-safe shapes. DI v5 remains the sole owner
+ * of semantic validation and canonicalization of container definitions.
  */
 class ConfigProvider
 {
@@ -26,10 +26,10 @@ class ConfigProvider
             ));
         }
 
-        $config = [
+        $config = config_merge([], [
             ConfigKey::DEPENDENCIES => $this->getDependencies(),
             ...$application,
-        ];
+        ]);
 
         foreach ($this->getProviders() as $provider) {
             if (!is_callable($provider)) {
@@ -113,9 +113,7 @@ class ConfigProvider
         return [];
     }
 
-    /**
-     * Null means this provider does not change the previously composed flag.
-     */
+    /** Null means this provider does not change the previously composed flag. */
     protected function shouldReplaceParameterResolvers(): ?bool
     {
         return null;
@@ -127,9 +125,7 @@ class ConfigProvider
         return [];
     }
 
-    /**
-     * Null means this provider does not change the previously composed flag.
-     */
+    /** Null means this provider does not change the previously composed flag. */
     protected function shouldReplaceAttributeDefinitions(): ?bool
     {
         return null;
