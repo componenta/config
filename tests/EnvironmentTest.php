@@ -17,6 +17,13 @@ it('reads literal and ConfigPath environment names', function (): void {
         ->and($environment->string(new ConfigPath('database.host')))->toBe('localhost');
 });
 
+it('rejects invalid environment snapshot keys', function (): void {
+    expect(fn() => new Environment([0 => 'value']))
+        ->toThrow(InvalidArgumentException::class, 'non-empty strings')
+        ->and(fn() => new Environment(['' => 'value']))
+        ->toThrow(InvalidArgumentException::class, 'non-empty strings');
+});
+
 it('supports defaults and required lookup', function (): void {
     $environment = new Environment([]);
 

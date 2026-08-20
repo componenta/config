@@ -8,6 +8,7 @@ use Componenta\Arrayable\Arrayable;
 use Componenta\Config\Exception\ConfigException;
 use Componenta\Config\Exception\InvalidConfigValueException;
 use Componenta\Config\Internal\TypeConverter;
+use InvalidArgumentException;
 
 /**
  * Immutable snapshot of environment values.
@@ -17,8 +18,23 @@ use Componenta\Config\Internal\TypeConverter;
  */
 final readonly class Environment implements \Countable, \IteratorAggregate, Arrayable
 {
-    /** @param array<string, mixed> $data */
-    public function __construct(private array $data) {}
+    /** @var array<string, mixed> */
+    private array $data;
+
+    /** @param array<array-key, mixed> $data */
+    public function __construct(array $data)
+    {
+        foreach ($data as $key => $_value) {
+            if (!is_string($key) || $key === '') {
+                throw new InvalidArgumentException(
+                    'Environment keys must be non-empty strings.',
+                );
+            }
+        }
+
+        /** @var array<string, mixed> $data */
+        $this->data = $data;
+    }
 
     /** @param list<string>|null $keys */
     public static function fromGlobals(?array $keys = null): self
@@ -28,7 +44,7 @@ final readonly class Environment implements \Countable, \IteratorAggregate, Arra
 
         if (is_array($native)) {
             foreach ($native as $key => $value) {
-                if (is_string($key) && is_string($value)) {
+                if (is_string($key) && $key !== '' && is_string($value)) {
                     $data[$key] = $value;
                 }
             }
@@ -36,6 +52,7 @@ final readonly class Environment implements \Countable, \IteratorAggregate, Arra
 
         foreach ($_SERVER as $key => $value) {
             if (is_string($key)
+                && $key !== ''
                 && (is_string($value) || is_int($value) || is_float($value) || is_bool($value))
             ) {
                 $data[$key] = $value;
@@ -43,7 +60,7 @@ final readonly class Environment implements \Countable, \IteratorAggregate, Arra
         }
 
         foreach ($_ENV as $key => $value) {
-            if (is_string($key)) {
+            if (is_string($key) && $key !== '') {
                 $data[$key] = $value;
             }
         }

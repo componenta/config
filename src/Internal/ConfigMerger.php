@@ -109,9 +109,17 @@ final class ConfigMerger
             ));
         }
 
-        $delegators = $dependencies[ConfigKey::DELEGATORS] ?? null;
-        if ($delegators === null || !is_array($delegators)) {
+        if (!array_key_exists(ConfigKey::DELEGATORS, $dependencies)) {
             return;
+        }
+
+        $delegators = $dependencies[ConfigKey::DELEGATORS];
+        if (!is_array($delegators)) {
+            throw new InvalidArgumentException(sprintf(
+                'Dependency section "%s" must be an array; got %s.',
+                ConfigKey::DELEGATORS,
+                get_debug_type($delegators),
+            ));
         }
 
         foreach ($delegators as $id => $pipeline) {

@@ -114,14 +114,15 @@ it('rejects a direct callable pair because its meaning would change after compos
     ]))->toThrow(InvalidArgumentException::class, 'callable pairs must be nested');
 });
 
-it('rejects non-list delegator pipelines before merge can mutate their shape', function (): void {
+it('rejects malformed delegator sections and pipelines before merge can mutate their shape', function (): void {
     expect(fn() => config_merge([], [
-        ConfigKey::DEPENDENCIES => [
-            ConfigKey::DELEGATORS => [
-                'service' => ['first' => 'DecoratorA'],
+        ConfigKey::DEPENDENCIES => [ConfigKey::DELEGATORS => 'invalid'],
+    ]))->toThrow(InvalidArgumentException::class, 'must be an array')
+        ->and(fn() => config_merge([], [
+            ConfigKey::DEPENDENCIES => [
+                ConfigKey::DELEGATORS => ['service' => ['first' => 'DecoratorA']],
             ],
-        ],
-    ]))->toThrow(InvalidArgumentException::class, 'pipeline list');
+        ]))->toThrow(InvalidArgumentException::class, 'pipeline list');
 });
 
 it('rejects a non-array dependency root before it can replace valid dependencies', function (): void {
