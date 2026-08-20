@@ -21,7 +21,7 @@ function entry(string $id, ?string $type = null): ContainerEntry
 }
 
 function config_entry(
-    string|ConfigPath $key,
+    int|string|ConfigPath $key,
     mixed $default = DefaultValue::None,
 ): ConfigEntry {
     return new ConfigEntry($key, $default);
@@ -48,58 +48,31 @@ function config(ContainerInterface $container): Config
     return $config;
 }
 
+/**
+ * Return the raw environment value using Componenta environment precedence.
+ * Typed conversion belongs to env_string/env_int/env_float/env_bool/env_array.
+ */
 function env(string $key, mixed $default = DefaultValue::None): mixed
 {
     $found = false;
     $value = raw_env_value($key, $found);
 
-    if (!$found) {
-        if ($default === DefaultValue::None) {
-            throw ConfigException::missingKey($key);
-        }
-
-        return $default;
-    }
-
-    if (!is_string($value)) {
+    if ($found) {
         return $value;
     }
 
-    if (is_numeric($value)) {
-        return str_contains(strtolower($value), '.')
-            || str_contains(strtolower($value), 'e')
-            ? (float) $value
-            : (int) $value;
+    if ($default === DefaultValue::None) {
+        throw ConfigException::missingKey($key);
     }
 
-    $lower = strtolower(trim($value));
-
-    if (in_array($lower, ['true', 'yes', 'y', 'on', 'enabled'], true)) {
-        return true;
-    }
-
-    if (in_array($lower, ['false', 'no', 'n', 'off', 'disabled'], true)) {
-        return false;
-    }
-
-    return $value;
+    return $default;
 }
 
 function env_string(
     string $key,
     string|DefaultValue $default = DefaultValue::None,
 ): string {
-    $found = false;
-    $value = raw_env_value($key, $found);
-
-    if (!$found) {
-        if ($default === DefaultValue::None) {
-            throw ConfigException::missingKey($key);
-        }
-
-        return $default;
-    }
-
+    $value = env($key, $default);
     $result = TypeConverter::toString($value);
 
     if ($result === null) {
@@ -116,17 +89,7 @@ function env_int(
     string $key,
     int|DefaultValue $default = DefaultValue::None,
 ): int {
-    $found = false;
-    $value = raw_env_value($key, $found);
-
-    if (!$found) {
-        if ($default === DefaultValue::None) {
-            throw ConfigException::missingKey($key);
-        }
-
-        return $default;
-    }
-
+    $value = env($key, $default);
     $result = TypeConverter::toInt($value);
 
     if ($result === null) {
@@ -143,17 +106,7 @@ function env_float(
     string $key,
     float|DefaultValue $default = DefaultValue::None,
 ): float {
-    $found = false;
-    $value = raw_env_value($key, $found);
-
-    if (!$found) {
-        if ($default === DefaultValue::None) {
-            throw ConfigException::missingKey($key);
-        }
-
-        return $default;
-    }
-
+    $value = env($key, $default);
     $result = TypeConverter::toFloat($value);
 
     if ($result === null) {
@@ -170,17 +123,7 @@ function env_bool(
     string $key,
     bool|DefaultValue $default = DefaultValue::None,
 ): bool {
-    $found = false;
-    $value = raw_env_value($key, $found);
-
-    if (!$found) {
-        if ($default === DefaultValue::None) {
-            throw ConfigException::missingKey($key);
-        }
-
-        return $default;
-    }
-
+    $value = env($key, $default);
     $result = TypeConverter::toBool($value);
 
     if ($result === null) {
@@ -197,18 +140,7 @@ function env_array(
     string $key,
     array|DefaultValue $default = DefaultValue::None,
 ): array {
-    $found = false;
-    $value = raw_env_value($key, $found);
-
-    if (!$found) {
-        if ($default === DefaultValue::None) {
-            throw ConfigException::missingKey($key);
-        }
-
-        return $default;
-    }
-
-    return TypeConverter::toArray($value);
+    return TypeConverter::toArray(env($key, $default));
 }
 
 function config_merge(array $base, array $override): array

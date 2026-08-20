@@ -18,20 +18,38 @@ it('rejects ambiguous boolean values', function (): void {
         ->and(TypeConverter::toBool([]))->toBeNull();
 });
 
-it('converts integer values according to the public config contract', function (): void {
+it('converts only lossless integer values', function (): void {
     expect(TypeConverter::toInt(42))->toBe(42)
         ->and(TypeConverter::toInt('42'))->toBe(42)
+        ->and(TypeConverter::toInt('001'))->toBe(1)
+        ->and(TypeConverter::toInt('+001'))->toBe(1)
+        ->and(TypeConverter::toInt('-001'))->toBe(-1)
+        ->and(TypeConverter::toInt(3.0))->toBe(3)
         ->and(TypeConverter::toInt(true))->toBe(1)
-        ->and(TypeConverter::toInt(false))->toBe(0)
+        ->and(TypeConverter::toInt(false))->toBe(0);
+});
+
+it('rejects fractional scientific overflow and non-finite integer input', function (): void {
+    $overflow = PHP_INT_MAX . '0';
+
+    expect(TypeConverter::toInt(3.9))->toBeNull()
+        ->and(TypeConverter::toInt('3.9'))->toBeNull()
+        ->and(TypeConverter::toInt('1e3'))->toBeNull()
+        ->and(TypeConverter::toInt($overflow))->toBeNull()
+        ->and(TypeConverter::toInt(INF))->toBeNull()
+        ->and(TypeConverter::toInt(NAN))->toBeNull()
         ->and(TypeConverter::toInt('not-a-number'))->toBeNull()
         ->and(TypeConverter::toInt(''))->toBeNull();
 });
 
-it('converts floating point values', function (): void {
+it('converts finite floating point values', function (): void {
     expect(TypeConverter::toFloat(42))->toBe(42.0)
         ->and(TypeConverter::toFloat('3.14'))->toBe(3.14)
+        ->and(TypeConverter::toFloat('1e3'))->toBe(1000.0)
         ->and(TypeConverter::toFloat(false))->toBe(0.0)
-        ->and(TypeConverter::toFloat('invalid'))->toBeNull();
+        ->and(TypeConverter::toFloat('invalid'))->toBeNull()
+        ->and(TypeConverter::toFloat(INF))->toBeNull()
+        ->and(TypeConverter::toFloat('1e9999'))->toBeNull();
 });
 
 it('converts scalar and Stringable values to string', function (): void {
@@ -51,4 +69,10 @@ it('converts arrays and comma-separated strings', function (): void {
         ->and(TypeConverter::toArray(''))->toBe([])
         ->and(TypeConverter::toArray(null))->toBe([])
         ->and(TypeConverter::toArray(1))->toBe([1]);
+});
+
+it('does not expose obsolete convertibility helpers', function (): void {
+    expect(method_exists(TypeConverter::class, 'isConvertibleToInt'))->toBeFalse()
+        ->and(method_exists(TypeConverter::class, 'isConvertibleToFloat'))->toBeFalse()
+        ->and(method_exists(TypeConverter::class, 'isConvertibleToString'))->toBeFalse();
 });

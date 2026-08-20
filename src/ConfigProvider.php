@@ -5,23 +5,30 @@ declare(strict_types=1);
 namespace Componenta\Config;
 
 use InvalidArgumentException;
-use ReflectionMethod;
 
 /**
- * Base provider for application and dependency configuration.
+ * Base provider for the dependency schema consumed by Componenta DI v5.
  *
- * Override only the sections your package owns. Child providers are evaluated
- * when the provider is invoked and merged in declaration order, so provider
- * subclasses remain free to use ordinary constructors for their own state.
+ * The provider composes data; DI owns validation and canonicalization of
+ * factories, invokables, aliases, delegators and extension specifications.
  */
 class ConfigProvider
 {
     /** @return array<array-key, mixed> */
     public function __invoke(): array
     {
+        $application = $this->getConfig();
+
+        if (array_key_exists(ConfigKey::DEPENDENCIES, $application)) {
+            throw new InvalidArgumentException(sprintf(
+                'Application configuration must not define reserved root key "%s".',
+                ConfigKey::DEPENDENCIES,
+            ));
+        }
+
         $config = [
             ConfigKey::DEPENDENCIES => $this->getDependencies(),
-            ...$this->getConfig(),
+            ...$application,
         ];
 
         foreach ($this->getProviders() as $provider) {
@@ -71,19 +78,24 @@ class ConfigProvider
         return [];
     }
 
-    /** @return array<int|string, class-string> */
+    /** @return array<int|string, mixed> */
     protected function getInvokables(): array
     {
         return [];
     }
 
-    /** @return array<string, non-empty-string> */
+    /** @return array<string, mixed> */
     protected function getAliases(): array
     {
         return [];
     }
 
-    /** @return array<string, list<mixed>> */
+    /**
+     * Each service maps to a delegator pipeline. Callable pairs are pipeline
+     * entries and therefore must be nested: `[[Decorator::class, 'decorate']]`.
+     *
+     * @return array<string, list<mixed>>
+     */
     protected function getDelegators(): array
     {
         return [];
@@ -101,9 +113,12 @@ class ConfigProvider
         return [];
     }
 
-    protected function shouldReplaceParameterResolvers(): bool
+    /**
+     * Null means this provider does not change the previously composed flag.
+     */
+    protected function shouldReplaceParameterResolvers(): ?bool
     {
-        return false;
+        return null;
     }
 
     /** @return list<mixed> */
@@ -112,9 +127,12 @@ class ConfigProvider
         return [];
     }
 
-    protected function shouldReplaceAttributeDefinitions(): bool
+    /**
+     * Null means this provider does not change the previously composed flag.
+     */
+    protected function shouldReplaceAttributeDefinitions(): ?bool
     {
-        return false;
+        return null;
     }
 
     /** @return list<mixed> */
@@ -123,157 +141,33 @@ class ConfigProvider
         return [];
     }
 
-    /**
-     * Extra dependency sections understood by the downstream container.
-     *
-     * Keys must be non-empty strings and must not replace one of the standard
-     * sections exposed by this provider. The downstream consumer validates
-     * extension-specific keys and values.
-     *
-     * @return array<string, mixed>
-     */
-    protected function getDependencyExtensions(): array
-    {
-        return [];
-    }
-
     /** @return array<string, mixed> */
     final protected function getDependencies(): array
     {
-        [$invokables, $invokableAliases] = $this->normalizeInvokables($this->getInvokables());
-        $aliases = $this->mergeAliases($this->getAliases(), $invokableAliases);
-
-        $replaceParameterResolvers = $this->shouldReplaceParameterResolvers();
-        $replaceAttributeDefinitions = $this->shouldReplaceAttributeDefinitions();
-
         $dependencies = [
             ConfigKey::FACTORIES => $this->getFactories(),
-            ConfigKey::INVOKABLES => $invokables,
-            ConfigKey::ALIASES => $aliases,
+            ConfigKey::INVOKABLES => $this->getInvokables(),
+            ConfigKey::ALIASES => $this->getAliases(),
             ConfigKey::DELEGATORS => $this->getDelegators(),
             ConfigKey::SERVICES => $this->getServices(),
             ConfigKey::PARAMETER_RESOLVERS => $this->getParameterResolvers(),
-            ConfigKey::PARAMETER_RESOLVERS_REPLACE => $replaceParameterResolvers,
             ConfigKey::ATTRIBUTE_DEFINITIONS => $this->getAttributeDefinitions(),
-            ConfigKey::ATTRIBUTE_DEFINITIONS_REPLACE => $replaceAttributeDefinitions,
             ConfigKey::ATTRIBUTE_CAPABILITIES => $this->getAttributeCapabilities(),
         ];
 
-        foreach ($this->getDependencyExtensions() as $key => $value) {
-            if (!is_string($key) || $key === '') {
-                throw new InvalidArgumentException(
-                    'Dependency extension keys must be non-empty strings.',
-                );
-            }
-
-            if (array_key_exists($key, $dependencies)) {
-                throw new InvalidArgumentException(sprintf(
-                    'Dependency extension cannot replace standard key "%s".',
-                    $key,
-                ));
-            }
-
-            $dependencies[$key] = $value;
+        $replaceParameterResolvers = $this->shouldReplaceParameterResolvers();
+        if ($replaceParameterResolvers !== null) {
+            $dependencies[ConfigKey::PARAMETER_RESOLVERS_REPLACE] = $replaceParameterResolvers;
         }
 
-        $hasParameterResolverReplaceFlag = $replaceParameterResolvers
-            || $this->isHookOverridden('shouldReplaceParameterResolvers');
-        $hasAttributeDefinitionReplaceFlag = $replaceAttributeDefinitions
-            || $this->isHookOverridden('shouldReplaceAttributeDefinitions');
+        $replaceAttributeDefinitions = $this->shouldReplaceAttributeDefinitions();
+        if ($replaceAttributeDefinitions !== null) {
+            $dependencies[ConfigKey::ATTRIBUTE_DEFINITIONS_REPLACE] = $replaceAttributeDefinitions;
+        }
 
         return array_filter(
             $dependencies,
-            static function (mixed $value, int|string $key) use (
-                $hasParameterResolverReplaceFlag,
-                $hasAttributeDefinitionReplaceFlag,
-            ): bool {
-                if ($value === [] || $value === null) {
-                    return false;
-                }
-
-                if ($value !== false) {
-                    return true;
-                }
-
-                return ($key === ConfigKey::PARAMETER_RESOLVERS_REPLACE
-                        && $hasParameterResolverReplaceFlag)
-                    || ($key === ConfigKey::ATTRIBUTE_DEFINITIONS_REPLACE
-                        && $hasAttributeDefinitionReplaceFlag);
-            },
-            ARRAY_FILTER_USE_BOTH,
+            static fn(mixed $value): bool => $value !== [] && $value !== null,
         );
-    }
-
-    /**
-     * @param array<int|string, class-string> $invokables
-     * @return array{0: list<class-string>, 1: array<string, class-string>}
-     */
-    private function normalizeInvokables(array $invokables): array
-    {
-        $normalized = [];
-        $aliases = [];
-
-        foreach ($invokables as $key => $class) {
-            if (!is_string($class) || $class === '') {
-                throw new InvalidArgumentException(
-                    'Invokable entries must be non-empty class strings.',
-                );
-            }
-
-            $normalized[] = $class;
-
-            if (is_string($key)) {
-                if ($key === '') {
-                    throw new InvalidArgumentException(
-                        'Invokable alias ids must be non-empty strings.',
-                    );
-                }
-
-                $aliases[$key] = $class;
-            }
-        }
-
-        return [$normalized, $aliases];
-    }
-
-    /**
-     * @param array<string, non-empty-string> $explicit
-     * @param array<string, class-string> $fromInvokables
-     * @return array<string, non-empty-string>
-     */
-    private function mergeAliases(array $explicit, array $fromInvokables): array
-    {
-        foreach ($explicit as $alias => $target) {
-            if (!is_string($alias) || $alias === '' || !is_string($target) || $target === '') {
-                throw new InvalidArgumentException(
-                    'Aliases must map non-empty string ids to non-empty string targets.',
-                );
-            }
-        }
-
-        foreach ($fromInvokables as $alias => $target) {
-            if (isset($explicit[$alias]) && $explicit[$alias] !== $target) {
-                throw new InvalidArgumentException(sprintf(
-                    'Invokable alias "%s" conflicts with explicit alias target "%s".',
-                    $alias,
-                    $explicit[$alias],
-                ));
-            }
-
-            $explicit[$alias] ??= $target;
-        }
-
-        return $explicit;
-    }
-
-    private function isHookOverridden(string $method): bool
-    {
-        static $cache = [];
-
-        $class = static::class;
-
-        return $cache[$class][$method] ??= (new ReflectionMethod($class, $method))
-            ->getDeclaringClass()
-            ->getName() !== self::class;
     }
 }

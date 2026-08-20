@@ -7,7 +7,7 @@ namespace Componenta\Config;
 final readonly class ConfigEntry
 {
     public function __construct(
-        public string|ConfigPath $key,
+        public int|string|ConfigPath $key,
         public mixed $default = DefaultValue::None,
     ) {}
 

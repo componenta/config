@@ -4,28 +4,12 @@ declare(strict_types=1);
 
 namespace Componenta\Config\Internal;
 
-/**
- * Converts values to specific types.
- *
- * @internal This class is not part of the public API
- */
+/** @internal */
 final class TypeConverter
 {
     private const array TRUTHY_VALUES = ['true', '1', 'yes', 'on', 'enabled', 'y'];
     private const array FALSY_VALUES = ['false', '0', 'no', 'off', 'disabled', 'n', ''];
 
-    /**
-     * Convert value to boolean (strict).
-     *
-     * `bool` values pass through. Strings are matched against the documented
-     * TRUTHY/FALSY sets case-insensitively after trim. Any other input -
-     * including unrecognised strings like `"undefined"`, `"null"`, `"yse"` -
-     * returns null so the caller can raise an explicit error rather than
-     * silently coercing via `(bool)$value` (which would treat any non-empty
-     * string as `true` and hide typos).
-     *
-     * @return bool|null Null when the value is not unambiguously boolean.
-     */
     public static function toBool(mixed $value): ?bool
     {
         if (is_bool($value)) {
@@ -53,11 +37,6 @@ final class TypeConverter
         return null;
     }
 
-    /**
-     * Convert value to integer.
-     *
-     * @return int|null Returns null if conversion not possible
-     */
     public static function toInt(mixed $value): ?int
     {
         if (is_int($value)) {
@@ -69,33 +48,25 @@ final class TypeConverter
         }
 
         if (is_float($value)) {
-            return (int) $value;
-        }
-
-        if (is_string($value)) {
-            $trimmed = trim($value);
-
-            if ($trimmed === '') {
+            if (!is_finite($value) || floor($value) !== $value) {
                 return null;
             }
 
-            if (is_numeric($trimmed)) {
-                return (int) $trimmed;
-            }
+            $result = (int) $value;
+            return (float) $result === $value ? $result : null;
         }
 
-        return null;
+        if (!is_string($value)) {
+            return null;
+        }
+
+        return self::parseIntegerString(trim($value));
     }
 
-    /**
-     * Convert value to float.
-     *
-     * @return float|null Returns null if conversion not possible
-     */
     public static function toFloat(mixed $value): ?float
     {
         if (is_float($value)) {
-            return $value;
+            return is_finite($value) ? $value : null;
         }
 
         if (is_int($value)) {
@@ -106,26 +77,19 @@ final class TypeConverter
             return $value ? 1.0 : 0.0;
         }
 
-        if (is_string($value)) {
-            $trimmed = trim($value);
-
-            if ($trimmed === '') {
-                return null;
-            }
-
-            if (is_numeric($trimmed)) {
-                return (float) $trimmed;
-            }
+        if (!is_string($value)) {
+            return null;
         }
 
-        return null;
+        $trimmed = trim($value);
+        if ($trimmed === '' || !is_numeric($trimmed)) {
+            return null;
+        }
+
+        $result = (float) $trimmed;
+        return is_finite($result) ? $result : null;
     }
 
-    /**
-     * Convert value to string.
-     *
-     * @return string|null Returns null if conversion not possible
-     */
     public static function toString(mixed $value): ?string
     {
         if (is_string($value)) {
@@ -143,11 +107,6 @@ final class TypeConverter
         return null;
     }
 
-    /**
-     * Convert value to array.
-     *
-     * String values are split by comma.
-     */
     public static function toArray(mixed $value): array
     {
         if (is_array($value)) {
@@ -171,27 +130,31 @@ final class TypeConverter
         return [$value];
     }
 
-    /**
-     * Check if value can be converted to integer.
-     */
-    public static function isConvertibleToInt(mixed $value): bool
+    private static function parseIntegerString(string $value): ?int
     {
-        return self::toInt($value) !== null;
+        if (preg_match('/^([+-]?)(\d+)$/D', $value, $matches) !== 1) {
+            return null;
+        }
+
+        $negative = $matches[1] === '-';
+        $digits = ltrim($matches[2], '0');
+
+        if ($digits === '') {
+            return 0;
+        }
+
+        $limit = $negative
+            ? substr((string) PHP_INT_MIN, 1)
+            : (string) PHP_INT_MAX;
+
+        if (strlen($digits) > strlen($limit)
+            || (strlen($digits) === strlen($limit) && strcmp($digits, $limit) > 0)
+        ) {
+            return null;
+        }
+
+        return (int) (($negative ? '-' : '') . $digits);
     }
 
-    /**
-     * Check if value can be converted to float.
-     */
-    public static function isConvertibleToFloat(mixed $value): bool
-    {
-        return self::toFloat($value) !== null;
-    }
-
-    /**
-     * Check if value can be converted to string.
-     */
-    public static function isConvertibleToString(mixed $value): bool
-    {
-        return self::toString($value) !== null;
-    }
+    private function __construct() {}
 }

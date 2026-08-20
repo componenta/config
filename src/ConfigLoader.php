@@ -10,17 +10,25 @@ use Componenta\VarExport\Export;
 use Throwable;
 
 /**
- * Builds Config instances from providers and persists fully exportable config
- * snapshots as PHP cache files.
+ * Builds runtime Config snapshots and persists application configuration data.
+ * Environment is runtime-only and is never written to the persistent cache.
  */
 final class ConfigLoader
 {
-    public static function load(?Environment $environment, callable ...$providers): Config
+    public const int CACHE_VERSION = 1;
+
+    /** @var array<string, true> */
+    private const array CACHE_KEYS = [
+        'version' => true,
+        'config' => true,
+    ];
+
+    public static function load(Environment $environment, callable ...$providers): Config
     {
         return new Config(self::merge($providers), $environment);
     }
 
-    public static function loadFromFile(string $file, bool $populateEnv = false): Config
+    public static function loadFromFile(string $file, Environment $environment): Config
     {
         if (!is_file($file) || !is_readable($file)) {
             throw new ConfigException(sprintf(
@@ -36,27 +44,7 @@ final class ConfigLoader
                 throw new ConfigException('Invalid configuration cache format.');
             }
 
-            $data = $cached['config'] ?? [];
-            if (!is_array($data)) {
-                throw new ConfigException('Configuration cache "config" entry must be an array.');
-            }
-
-            $environmentData = $cached['environment'] ?? null;
-            if ($environmentData !== null && !is_array($environmentData)) {
-                throw new ConfigException(
-                    'Configuration cache "environment" entry must be an array or null.',
-                );
-            }
-
-            if ($populateEnv && $environmentData !== null) {
-                /** @var array<string, mixed> $environmentData */
-                populate_env($environmentData);
-            }
-
-            return new Config(
-                $data,
-                $environmentData === null ? null : new Environment($environmentData),
-            );
+            return new Config(self::configFromCache($cached), $environment);
         } catch (ConfigException $e) {
             throw $e;
         } catch (Throwable $e) {
@@ -70,9 +58,37 @@ final class ConfigLoader
     public static function export(Config $config, string $filename): void
     {
         self::exportToFile($filename, [
+            'version' => self::CACHE_VERSION,
             'config' => $config->toArray(),
-            'environment' => $config->environment?->toArray(),
         ]);
+    }
+
+    /** @param array<array-key, mixed> $cache @return array<array-key, mixed> */
+    private static function configFromCache(array $cache): array
+    {
+        foreach ($cache as $key => $_value) {
+            if (!is_string($key) || !isset(self::CACHE_KEYS[$key])) {
+                throw new ConfigException(sprintf(
+                    'Unsupported configuration cache envelope key "%s".',
+                    (string) $key,
+                ));
+            }
+        }
+
+        if (($cache['version'] ?? null) !== self::CACHE_VERSION) {
+            throw new ConfigException(sprintf(
+                'Unsupported configuration cache version; expected %d.',
+                self::CACHE_VERSION,
+            ));
+        }
+
+        if (!array_key_exists('config', $cache) || !is_array($cache['config'])) {
+            throw new ConfigException('Configuration cache "config" entry must be an array.');
+        }
+
+        /** @var array<array-key, mixed> $config */
+        $config = $cache['config'];
+        return $config;
     }
 
     /** @param array<array-key, mixed> $data */

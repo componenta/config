@@ -61,10 +61,11 @@ function withTemporaryEnv(string $key, mixed $value, Closure $test): void
     }
 }
 
-it('creates helper value objects', function (): void {
+it('creates helper value objects including integer config references', function (): void {
     expect(path('database.host'))->toBeInstanceOf(ConfigPath::class)
         ->and(entry('service'))->toBeInstanceOf(ContainerEntry::class)
         ->and(config_entry('fallback'))->toBeInstanceOf(ConfigEntry::class)
+        ->and(config_entry(0)->key)->toBe(0)
         ->and(lazy(static fn(): int => 1))->toBeInstanceOf(LazyValue::class);
 });
 
@@ -101,25 +102,24 @@ it('resolves Config from a PSR container and validates its type', function (): v
     expect(fn() => config($invalid))->toThrow(ConfigException::class, 'must be an instance');
 });
 
-it('reads and normalizes environment helper values', function (): void {
+it('returns raw environment values while typed helpers convert explicitly', function (): void {
     withTemporaryEnv('COMPONENTA_CONFIG_NUMBER', '3306', function (): void {
-        expect(env('COMPONENTA_CONFIG_NUMBER'))->toBe(3306)
+        expect(env('COMPONENTA_CONFIG_NUMBER'))->toBe('3306')
             ->and(env_string('COMPONENTA_CONFIG_NUMBER'))->toBe('3306')
             ->and(env_int('COMPONENTA_CONFIG_NUMBER'))->toBe(3306);
     });
 
     withTemporaryEnv('COMPONENTA_CONFIG_FLOAT', '1e3', function (): void {
-        expect(env('COMPONENTA_CONFIG_FLOAT'))->toBe(1000.0)
-            ->and(env_float('COMPONENTA_CONFIG_FLOAT'))->toBe(1000.0);
-    });
-
-    withTemporaryEnv('COMPONENTA_CONFIG_BOOL', 'enabled', function (): void {
-        expect(env_bool('COMPONENTA_CONFIG_BOOL'))->toBeTrue();
+        expect(env('COMPONENTA_CONFIG_FLOAT'))->toBe('1e3')
+            ->and(env_float('COMPONENTA_CONFIG_FLOAT'))->toBe(1000.0)
+            ->and(fn() => env_int('COMPONENTA_CONFIG_FLOAT'))
+            ->toThrow(ConfigException::class, 'to int');
     });
 
     withTemporaryEnv('COMPONENTA_CONFIG_FALSE_STRING', 'false', function (): void {
-        expect(env('COMPONENTA_CONFIG_FALSE_STRING'))->toBeFalse()
-            ->and(env_string('COMPONENTA_CONFIG_FALSE_STRING'))->toBe('false');
+        expect(env('COMPONENTA_CONFIG_FALSE_STRING'))->toBe('false')
+            ->and(env_string('COMPONENTA_CONFIG_FALSE_STRING'))->toBe('false')
+            ->and(env_bool('COMPONENTA_CONFIG_FALSE_STRING'))->toBeFalse();
     });
 
     withTemporaryEnv('COMPONENTA_CONFIG_ARRAY', 'redis, file', function (): void {
@@ -127,16 +127,16 @@ it('reads and normalizes environment helper values', function (): void {
     });
 });
 
-it('typed environment helpers convert the raw value without generic inference', function (): void {
-    withTemporaryEnv('COMPONENTA_CONFIG_TRUE_STRING', 'true', function (): void {
-        expect(env_string('COMPONENTA_CONFIG_TRUE_STRING'))->toBe('true')
-            ->and(fn() => env_int('COMPONENTA_CONFIG_TRUE_STRING'))
-            ->toThrow(ConfigException::class, 'to int');
+it('preserves lexical strings and rejects lossy integer conversion', function (): void {
+    withTemporaryEnv('COMPONENTA_CONFIG_PADDED', '001', function (): void {
+        expect(env_string('COMPONENTA_CONFIG_PADDED'))->toBe('001')
+            ->and(env_int('COMPONENTA_CONFIG_PADDED'))->toBe(1);
     });
 
-    withTemporaryEnv('COMPONENTA_CONFIG_ONE_STRING', '1', function (): void {
-        expect(env_string('COMPONENTA_CONFIG_ONE_STRING'))->toBe('1')
-            ->and(env_bool('COMPONENTA_CONFIG_ONE_STRING'))->toBeTrue();
+    withTemporaryEnv('COMPONENTA_CONFIG_FRACTIONAL', '3.9', function (): void {
+        expect(env_string('COMPONENTA_CONFIG_FRACTIONAL'))->toBe('3.9')
+            ->and(fn() => env_int('COMPONENTA_CONFIG_FRACTIONAL'))
+            ->toThrow(ConfigException::class, 'to int');
     });
 });
 

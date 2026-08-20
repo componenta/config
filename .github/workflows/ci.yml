@@ -87,8 +87,8 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --no-progress --prefer-dist
 
-      - name: Generate Clover coverage
-        run: ./vendor/bin/pest --coverage-clover coverage.xml
+      - name: Generate and enforce coverage
+        run: ./vendor/bin/pest --coverage-clover coverage.xml --min=80
 
       - name: Upload coverage
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

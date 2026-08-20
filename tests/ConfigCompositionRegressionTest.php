@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 use Componenta\Config\ConfigKey;
 use Componenta\Config\ConfigLoader;
+use Componenta\Config\Environment;
 
 use function Componenta\Config\config_merge;
 
 it('preserves parameter resolver priorities across providers', function (): void {
     $config = ConfigLoader::load(
-        null,
+        new Environment([]),
         static fn(): array => [
             ConfigKey::DEPENDENCIES => [
                 ConfigKey::PARAMETER_RESOLVERS => [1200 => 'ResolverA'],
@@ -65,17 +66,21 @@ it('treats factory alias and service values as atomic entries', function (): voi
         ->and($dependencies[ConfigKey::SERVICES]['settings'])->toBe(['new' => true]);
 });
 
-it('appends list-like dependency sections and delegator pipelines', function (): void {
+it('appends list-like dependency sections and nested delegator callable pairs', function (): void {
     $merged = config_merge(
         [ConfigKey::DEPENDENCIES => [
             ConfigKey::INVOKABLES => ['ServiceA'],
-            ConfigKey::DELEGATORS => ['service' => ['DecoratorA']],
+            ConfigKey::DELEGATORS => [
+                'service' => [['DecoratorA', 'decorate']],
+            ],
             ConfigKey::ATTRIBUTE_DEFINITIONS => ['DefinitionA'],
             ConfigKey::ATTRIBUTE_CAPABILITIES => ['CapabilityA'],
         ]],
         [ConfigKey::DEPENDENCIES => [
             ConfigKey::INVOKABLES => ['ServiceB'],
-            ConfigKey::DELEGATORS => ['service' => ['DecoratorB']],
+            ConfigKey::DELEGATORS => [
+                'service' => [['DecoratorB', 'decorate']],
+            ],
             ConfigKey::ATTRIBUTE_DEFINITIONS => ['DefinitionB'],
             ConfigKey::ATTRIBUTE_CAPABILITIES => ['CapabilityB'],
         ]],
@@ -84,12 +89,31 @@ it('appends list-like dependency sections and delegator pipelines', function ():
     $dependencies = $merged[ConfigKey::DEPENDENCIES];
 
     expect($dependencies[ConfigKey::INVOKABLES])->toBe(['ServiceA', 'ServiceB'])
-        ->and($dependencies[ConfigKey::DELEGATORS]['service'])->toBe(['DecoratorA', 'DecoratorB'])
-        ->and($dependencies[ConfigKey::ATTRIBUTE_DEFINITIONS])->toBe(['DefinitionA', 'DefinitionB'])
+        ->and($dependencies[ConfigKey::DELEGATORS]['service'])->toBe([
+            ['DecoratorA', 'decorate'],
+            ['DecoratorB', 'decorate'],
+        ])->and($dependencies[ConfigKey::ATTRIBUTE_DEFINITIONS])->toBe(['DefinitionA', 'DefinitionB'])
         ->and($dependencies[ConfigKey::ATTRIBUTE_CAPABILITIES])->toBe(['CapabilityA', 'CapabilityB']);
 });
 
-it('uses normal recursive merge semantics outside the root dependency section', function (): void {
+it('preserves keyed invokables until DI v5 canonicalization', function (): void {
+    $merged = config_merge(
+        [ConfigKey::DEPENDENCIES => [
+            ConfigKey::INVOKABLES => ['service' => 'ServiceA', 'First'],
+        ]],
+        [ConfigKey::DEPENDENCIES => [
+            ConfigKey::INVOKABLES => ['service' => 'ServiceB', 'Second'],
+        ]],
+    );
+
+    expect($merged[ConfigKey::DEPENDENCIES][ConfigKey::INVOKABLES])->toBe([
+        'service' => 'ServiceB',
+        0 => 'First',
+        1 => 'Second',
+    ]);
+});
+
+it('uses normal recursive merge semantics outside the dependency root', function (): void {
     expect(config_merge(
         ['feature' => ['items' => ['a'], 'settings' => ['a' => 1]]],
         ['feature' => ['items' => ['b'], 'settings' => ['b' => 2]]],

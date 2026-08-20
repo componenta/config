@@ -1,6 +1,6 @@
 {
     "name": "componenta/config",
-    "description": "Composable configuration, environment loading, typed access and cache generation for PHP 8.4+",
+    "description": "Composable configuration, runtime environment access and cache generation for PHP 8.4+",
     "type": "library",
     "license": "MIT",
     "keywords": [
@@ -47,6 +47,7 @@
     },
     "scripts": {
         "test": "pest",
+        "test-coverage": "pest --coverage --min=80",
         "phpstan": "phpstan analyse src --level=max",
         "cs-check": "php-cs-fixer fix --dry-run --diff",
         "cs-fix": "php-cs-fixer fix",
