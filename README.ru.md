@@ -12,6 +12,8 @@ composer require componenta/config
 
 ## Быстрый старт
 
+Создайте конфигурацию из массива:
+
 ```php
 use Componenta\Config\Config;
 use function Componenta\Config\path;
@@ -32,14 +34,16 @@ $debug = $config->bool(path('app.debug'));
 ```php
 $config = new Config([
     'database.host' => 'literal-key',
-    'database' => ['host' => 'localhost'],
+    'database' => [
+        'host' => 'localhost',
+    ],
 ]);
 
 $config->get('database.host');       // literal-key
 $config->get(path('database.host')); // localhost
 ```
 
-Так ключи с точкой не конфликтуют с синтаксисом вложенных путей.
+Так ключи, содержащие точку, не конфликтуют с синтаксисом вложенных путей.
 
 ## Типизированное чтение
 
@@ -51,9 +55,16 @@ $enabled = $config->bool('enabled', false);
 $drivers = $config->array('drivers', []);
 ```
 
-Если значение нельзя корректно преобразовать, выбрасывается `InvalidConfigValueException`.
+Если значение нельзя корректно преобразовать, выбрасывается `InvalidConfigValueException`. Библиотека не скрывает ошибку неявным приведением к случайному значению.
 
-`get()` возвращает значение без преобразования. Если ключ обязателен, не передавайте default — при отсутствии будет выброшен `ConfigException`.
+`get()` возвращает значение без преобразования:
+
+```php
+$value = $config->get('key');
+$value = $config->get('optional', 'fallback');
+```
+
+Если ключ обязателен, не передавайте default — при его отсутствии будет выброшен `ConfigException`.
 
 ## Пути
 
@@ -70,13 +81,15 @@ $path->last();     // primary
 $path->isNested(); // true
 ```
 
-## Defaults и ссылки на другие ключи
+## Значения по умолчанию и ссылки
+
+Обычный default:
 
 ```php
 $timeout = $config->int('timeout', 30);
 ```
 
-Fallback из другого ключа:
+Если fallback должен браться из другого ключа конфигурации, используйте `ConfigEntry`:
 
 ```php
 use function Componenta\Config\config_entry;
@@ -90,9 +103,9 @@ $name = $config->string(
 
 ## Ленивые значения
 
-Обычный callable хранится как значение и автоматически не выполняется.
+Обычные callable хранятся как значения и автоматически не выполняются.
 
-Явное ленивое вычисление:
+Для явного ленивого вычисления используйте `lazy()`:
 
 ```php
 use Componenta\Config\Config;
@@ -109,9 +122,9 @@ $config = new Config([
 $dsn = $config->string('dsn');
 ```
 
-Результат кешируется **отдельно для каждого `Config` или `ContainerValue`**. Один wrapper можно безопасно использовать в нескольких снимках конфигурации.
+По умолчанию результат кешируется **отдельно для каждого `Config` или `ContainerValue`**. Один и тот же wrapper можно безопасно использовать в нескольких снимках конфигурации — результат одного контекста не попадет в другой.
 
-Отключение кеша:
+Кеш можно отключить:
 
 ```php
 $value = lazy(
@@ -122,7 +135,7 @@ $value = lazy(
 
 ## Фильтрация
 
-`Config` неизменяем. `only()` и `except()` возвращают новый объект:
+`Config` неизменяем. `only()` и `except()` создают новый объект:
 
 ```php
 $public = $config->only([
@@ -135,7 +148,9 @@ $withoutSecrets = $config->except([
 ]);
 ```
 
-Исходный объект не изменяется. `Config` также реализует `Countable`, `IteratorAggregate`, read-only `ArrayAccess` и `Componenta\Arrayable\Arrayable`.
+Исходный объект не изменяется.
+
+Также `Config` реализует `Countable`, `IteratorAggregate`, `ArrayAccess` для чтения и `Componenta\Arrayable\Arrayable`.
 
 ## Переменные окружения
 
@@ -159,7 +174,7 @@ $debug = $environment->bool('APP_DEBUG');
 $environment = Environment::fromGlobals();
 ```
 
-Приоритет:
+Приоритет источников:
 
 ```text
 process environment < $_SERVER < $_ENV
@@ -173,7 +188,7 @@ $environment->string(path('database.host')); // DATABASE_HOST
 
 ### Загрузка `.env`
 
-По умолчанию `EnvLoader` читает `.env`, затем `.env.local`:
+По умолчанию `EnvLoader` читает только `.env`, затем `.env.local`:
 
 ```php
 use Componenta\Config\Loader\EnvLoader;
@@ -181,13 +196,15 @@ use Componenta\Config\Loader\EnvLoader;
 $environment = (new EnvLoader('.'))->load();
 ```
 
-`.env.local` перекрывает `.env`. Значения окружения развертывания имеют приоритет, пока override не включен явно:
+`.env.local` перекрывает значения из `.env`.
+
+Значения, уже заданные окружением приложения, имеют приоритет. Явное перекрытие:
 
 ```php
 $environment = (new EnvLoader('.'))->load(override: true);
 ```
 
-`.env.example`, backup-файлы и другие `.env*` автоматически не загружаются. Другие имена задаются явно:
+Файлы `.env.example`, резервные копии и другие совпадения `.env*` автоматически не загружаются. Другой набор задается явно:
 
 ```php
 $loader = new EnvLoader(
@@ -205,7 +222,7 @@ $loader = new EnvLoader(
 );
 ```
 
-Они могут находиться как в файлах, так и в окружении развертывания.
+Они могут быть определены как в загруженных файлах, так и окружением развертывания.
 
 `read()` только разбирает файлы и не изменяет `$_ENV`/`$_SERVER`.
 
@@ -227,7 +244,7 @@ $hosts = env_array('HOSTS', []);
 $value = env('CUSTOM_VALUE');
 ```
 
-Типизированные функции не выполняют небезопасное молчаливое преобразование.
+Типизированные функции преобразуют исходное значение environment variable напрямую и выбрасывают исключение, если безопасное преобразование невозможно. Только общий `env()` автоматически определяет boolean и numeric значения.
 
 ## Конфигурация из файлов
 
@@ -256,7 +273,7 @@ return [
 
 Корень JSON должен быть object или array.
 
-Любой файл, попавший под pattern, считается конфигурацией. Нечитаемый или поврежденный файл, неподдерживаемое расширение и неправильный root приводят к `ConfigException`, а не игнорируются.
+Любой файл, попавший под pattern, считается конфигурационным. Нечитаемый файл, неверный формат, неподдерживаемое расширение или некорректный root приводят к `ConfigException`, а не молча игнорируются.
 
 ### Свой reader
 
@@ -282,7 +299,7 @@ final class IniReader implements FileReaderInterface
 }
 ```
 
-`null` означает только «reader не поддерживает этот формат». Если расширение поддерживается, ошибка чтения или разбора должна завершаться исключением.
+`null` означает только «этот reader не поддерживает формат». Ошибка чтения или разбора поддерживаемого файла должна завершаться исключением.
 
 ```php
 $provider = new FileProvider(
@@ -305,6 +322,8 @@ $config = ConfigLoader::load(
 
 Более поздний provider перекрывает scalar/map значения. Обычные numeric arrays добавляются в конец.
 
+Прямое объединение:
+
 ```php
 use function Componenta\Config\config_merge;
 
@@ -318,7 +337,7 @@ $merged = config_merge(
 
 ## ConfigProvider для пакетов
 
-`ConfigProvider` публикует настройки приложения и metadata для DI-контейнера:
+`ConfigProvider` позволяет пакету публиковать настройки приложения и metadata для контейнера зависимостей:
 
 ```php
 use Componenta\Config\ConfigProvider;
@@ -328,7 +347,9 @@ final class PackageConfigProvider extends ConfigProvider
     protected function getConfig(): array
     {
         return [
-            'feature' => ['enabled' => true],
+            'feature' => [
+                'enabled' => true,
+            ],
         ];
     }
 
@@ -378,7 +399,7 @@ protected function getProviders(): iterable
 
 ### Свои parameter resolvers
 
-Ключ массива — priority и сохраняется при объединении:
+Ключ массива — priority, поэтому он сохраняется при композиции:
 
 ```php
 protected function getParameterResolvers(): array
@@ -390,7 +411,7 @@ protected function getParameterResolvers(): array
 }
 ```
 
-При совпадении priority более поздний resolver заменяет предыдущий целиком.
+Если более поздний provider использует тот же priority, resolver заменяется целиком.
 
 Полная замена стандартной цепочки:
 
@@ -402,6 +423,8 @@ protected function shouldReplaceParameterResolvers(): bool
 ```
 
 ### Attribute definitions и capabilities
+
+Контейнеры с композицией атрибутов могут получать определения через provider:
 
 ```php
 protected function getAttributeDefinitions(): array
@@ -431,9 +454,11 @@ protected function shouldReplaceAttributeDefinitions(): bool
 }
 ```
 
-Конкретные `AttributeDefinition`, `CapabilityPolicy` и handlers принадлежат контейнеру. `componenta/config` только передает и корректно объединяет значения.
+Конкретные классы `AttributeDefinition`, `CapabilityPolicy` и handlers принадлежат контейнеру. `componenta/config` только передает и корректно объединяет эти значения.
 
 ### Container-specific extensions
+
+Если контейнеру нужна дополнительная metadata:
 
 ```php
 protected function getDependencyExtensions(): array
@@ -446,17 +471,19 @@ protected function getDependencyExtensions(): array
 }
 ```
 
-Extension не может заменить стандартную секцию. Проверку специальных ключей выполняет потребитель.
+Extension не может подменить стандартную секцию. Проверка container-specific ключей выполняется потребителем.
 
-## Merge semantics для dependencies
+## Правила merge для dependencies
 
-- `factories`, `aliases`, `services`, `parameter_resolvers` — identity maps; совпавший id/priority заменяется атомарно.
+Для корневой секции `dependencies` используются специальные правила:
+
+- `factories`, `aliases`, `services`, `parameter_resolvers` — карты с идентичностью ключа; совпавший id/priority заменяется атомарно.
 - `invokables`, `attribute_definitions`, `attribute_capabilities` — списки; элементы добавляются в порядке providers.
 - delegators одного сервиса добавляются в порядке providers.
 - replace-флаги — scalar; выигрывает более поздний provider.
 - остальная конфигурация объединяется обычным рекурсивным алгоритмом.
 
-Так resolver priorities не переиндексируются, а factory/service definitions не склеиваются как вложенные массивы.
+Так priorities не переиндексируются, а factory/service definitions не склеиваются как обычные вложенные массивы.
 
 ## PHP-кеш
 
@@ -480,11 +507,13 @@ $config = ConfigLoader::loadFromFile(
 );
 ```
 
-Кеш сначала полностью записывается во временный файл и только затем активируется через `rename()`, поэтому читатель не получает частично записанный PHP.
+Кеш полностью записывается во временный файл, сбрасывается на диск, проходит PHP lint и только после этого активируется через `rename()`. Если предыдущий artifact находится в OPcache, старый opcode инвалидируется до замены файла.
 
 Данные должны поддерживаться `componenta/var-export`. Runtime-only объекты, например closures, перед постоянным кешированием нужно вычислить или исключить.
 
 ## ContainerValue
+
+`ContainerValue` оборачивает любой PSR-11 контейнер:
 
 ```php
 use Componenta\Config\ContainerValue;
@@ -522,12 +551,13 @@ $name = $value->find(
 
 Общая граница — `Componenta\Config\Exception\ConfigExceptionInterface`.
 
-- `ConfigException` — отсутствующий ключ, неверный provider, ошибки файлов и кеша.
+Основные исключения:
+
+- `ConfigException` — отсутствующий ключ, неправильный provider, ошибки файлов и кеша.
 - `InvalidConfigValueException` — невозможно выполнить типизированное преобразование.
 - `InvalidContainerValueException` — container entry не соответствует ожидаемому типу.
-- `EnvLoaderException` — ошибка dotenv или отсутствует required variable.
+- `EnvLoaderException` — ошибка чтения/разбора dotenv или отсутствует required variable.
 
-## Требования
+## Лицензия
 
-- PHP 8.4+
-- PSR-11 для container helpers
+MIT.

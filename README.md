@@ -32,9 +32,14 @@ $debug = $config->bool(path('app.debug'));
 A plain string is always a **literal key**. Use `ConfigPath` when you want nested lookup:
 
 ```php
+use Componenta\Config\Config;
+use function Componenta\Config\path;
+
 $config = new Config([
     'database.host' => 'literal-key',
-    'database' => ['host' => 'localhost'],
+    'database' => [
+        'host' => 'localhost',
+    ],
 ]);
 
 $config->get('database.host');       // literal-key
@@ -44,6 +49,8 @@ $config->get(path('database.host')); // localhost
 This distinction avoids ambiguity when configuration keys themselves contain dots.
 
 ## Typed values
+
+`Config` has typed accessors for common scalar configuration:
 
 ```php
 $host = $config->string(path('database.host'));
@@ -55,9 +62,18 @@ $drivers = $config->array('drivers', []);
 
 Invalid conversions fail with `InvalidConfigValueException` instead of silently producing an unrelated value.
 
-`get()` returns the stored value as-is. Omit the default when a key is required; a missing required key raises `ConfigException`.
+`get()` returns the stored value as-is:
+
+```php
+$value = $config->get('key');
+$value = $config->get('optional', 'fallback');
+```
+
+If a key is required, omit the default. A missing key then raises `ConfigException`.
 
 ## Paths
+
+Create paths directly or with the `path()` helper:
 
 ```php
 use Componenta\Config\ConfigPath;
@@ -65,7 +81,11 @@ use function Componenta\Config\path;
 
 $path = new ConfigPath('database.connections.primary');
 $path = path('database.connections.primary');
+```
 
+Useful path methods:
+
+```php
 $path->toArray();  // ['database', 'connections', 'primary']
 $path->first();    // database
 $path->last();     // primary
@@ -101,6 +121,7 @@ For explicit lazy evaluation, wrap the callback with `lazy()`:
 ```php
 use Componenta\Config\Config;
 use function Componenta\Config\lazy;
+use function Componenta\Config\path;
 
 $config = new Config([
     'host' => 'localhost',
@@ -139,11 +160,15 @@ $withoutSecrets = $config->except([
 ]);
 ```
 
-The original instance is unchanged. `Config` also implements `Countable`, `IteratorAggregate`, read-only `ArrayAccess` and `Componenta\Arrayable\Arrayable`.
+The original instance is unchanged.
+
+`Config` also implements `Countable`, `IteratorAggregate`, `ArrayAccess` for reads, and `Componenta\Arrayable\Arrayable`.
 
 ## Environment values
 
 ### Environment snapshot
+
+`Environment` is an immutable environment snapshot:
 
 ```php
 use Componenta\Config\Environment;
@@ -157,7 +182,7 @@ $mode = $environment->string('APP_ENV');
 $debug = $environment->bool('APP_DEBUG');
 ```
 
-Snapshot the current process, `$_SERVER` and `$_ENV` with:
+You can snapshot the current process, `$_SERVER` and `$_ENV`:
 
 ```php
 $environment = Environment::fromGlobals();
@@ -185,13 +210,15 @@ use Componenta\Config\Loader\EnvLoader;
 $environment = (new EnvLoader('.'))->load();
 ```
 
-`.env.local` can override values from `.env`. Existing deployment values remain authoritative unless override is requested explicitly:
+`.env.local` can override values from `.env`.
+
+Existing deployment/process values remain authoritative unless you explicitly enable override:
 
 ```php
 $environment = (new EnvLoader('.'))->load(override: true);
 ```
 
-Sample, backup and other `.env*` files are not discovered implicitly. Name alternative files explicitly:
+Sample, backup and other `.env*` files are **not** discovered implicitly. If you need different files, name them explicitly:
 
 ```php
 $loader = new EnvLoader(
@@ -200,7 +227,7 @@ $loader = new EnvLoader(
 );
 ```
 
-Required variables may come from loaded files or from the deployment environment:
+Required variables may come either from loaded files or from the deployment environment:
 
 ```php
 $loader = new EnvLoader(
@@ -209,9 +236,11 @@ $loader = new EnvLoader(
 );
 ```
 
-`read()` parses files without mutating `$_ENV` or `$_SERVER`.
+`read()` only parses files and does not mutate `$_ENV` or `$_SERVER`.
 
 ### Environment helper functions
+
+For small bootstrap files you can use:
 
 ```php
 use function Componenta\Config\env;
@@ -229,7 +258,7 @@ $hosts = env_array('HOSTS', []);
 $value = env('CUSTOM_VALUE');
 ```
 
-Typed helpers reject values they cannot safely convert.
+Typed helpers convert the raw environment value directly and reject values they cannot safely convert. The generic `env()` helper is the only helper that infers booleans and numeric types automatically.
 
 ## Loading configuration from files
 
@@ -258,7 +287,7 @@ return [
 
 JSON files must contain an object or array at the root.
 
-Every matched file is treated as a configuration input. An unreadable file, malformed file, unsupported matched extension or invalid root value fails fast with `ConfigException`.
+Matched files are treated as configuration inputs. An unreadable file, malformed file, unsupported matched extension or invalid root value fails fast with `ConfigException`.
 
 ### Custom file readers
 
@@ -286,7 +315,7 @@ final class IniReader implements FileReaderInterface
 }
 ```
 
-Return `null` only when the reader does not support the file format. Once a reader accepts an extension, read/parse failures should be reported rather than silently ignored.
+Return `null` only when the reader does not support the file format. Once a reader accepts an extension, parse/read failures should be reported instead of silently ignored.
 
 ```php
 $provider = new FileProvider(
@@ -311,7 +340,7 @@ $config = ConfigLoader::load(
 
 Later providers may replace scalar/map values. Generic numeric arrays are appended.
 
-Direct merge:
+You can use `config_merge()` directly:
 
 ```php
 use function Componenta\Config\config_merge;
@@ -336,7 +365,9 @@ final class PackageConfigProvider extends ConfigProvider
     protected function getConfig(): array
     {
         return [
-            'feature' => ['enabled' => true],
+            'feature' => [
+                'enabled' => true,
+            ],
         ];
     }
 
@@ -356,7 +387,7 @@ final class PackageConfigProvider extends ConfigProvider
 }
 ```
 
-Available dependency hooks:
+Available dependency hooks are:
 
 ```text
 getFactories()
@@ -372,7 +403,7 @@ getAttributeCapabilities()
 getDependencyExtensions()
 ```
 
-Compose child providers with `getProviders()`:
+`getProviders()` composes child providers:
 
 ```php
 protected function getProviders(): iterable
@@ -445,7 +476,7 @@ The concrete definition/capability objects belong to the consuming container pac
 
 ### Container-specific extensions
 
-If another container needs metadata not represented by the standard hooks:
+If another container needs metadata not represented by the standard hooks, expose it through `getDependencyExtensions()`:
 
 ```php
 protected function getDependencyExtensions(): array
@@ -458,7 +489,7 @@ protected function getDependencyExtensions(): array
 }
 ```
 
-Extension keys cannot replace standard dependency sections. The consuming package validates extension-specific keys and values.
+Extension keys cannot replace standard dependency sections. The consuming package is responsible for validating its extension keys and values.
 
 ## Dependency merge semantics
 
@@ -494,7 +525,7 @@ $config = ConfigLoader::loadFromFile(
 );
 ```
 
-Cache files are written through a temporary file and activated with `rename()`, so readers never observe a partially written PHP payload.
+Cache files are written to a temporary file, flushed, PHP-linted and only then activated with `rename()`. If the previous artifact is present in OPcache, it is invalidated before replacement so a successful export never leaves the old opcode attached to the new path.
 
 Configuration must be exportable by `componenta/var-export`. Runtime-only objects such as closures should be resolved or excluded before generating a persistent cache.
 
@@ -545,7 +576,8 @@ Common exceptions:
 - `InvalidContainerValueException` — a container entry does not satisfy the requested type.
 - `EnvLoaderException` — dotenv read, parse or required-variable failure.
 
-## Requirements
+Do not catch generic `Throwable` for ordinary configuration control flow; catch the package exception interface when you want one boundary for configuration failures.
 
-- PHP 8.4+
-- PSR-11 container interfaces for container helpers
+## License
+
+MIT.
