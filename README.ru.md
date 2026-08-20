@@ -4,6 +4,12 @@
 
 В пакете нет compatibility layer для старых DI schemas и нет собственного dev/prod режима. Bootstrap-слой решает, брать данные из providers или из persistent cache.
 
+## Установка
+
+```bash
+composer require componenta/config
+```
+
 ## Runtime model
 
 `Config` всегда содержит ровно один `Environment` snapshot:
@@ -177,7 +183,7 @@ $config = ConfigLoader::loadFromFile(
 
 DI v5 загружает собственный dependency cache и при build снова добавляет normalized dependencies в итоговый runtime `Config`. Поэтому provider и cache modes сходятся к одной runtime shape без build-time environment и без дублирования DI graph.
 
-Неизвестные envelope keys, embedded dependency root и stale cache version отклоняются.
+Неизвестные envelope keys, embedded dependency root и stale cache version отклоняются. На POSIX активированный cache-файл имеет права `0600`.
 
 ## Container helpers
 

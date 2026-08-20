@@ -19,7 +19,11 @@ final class ContainerValueTestContainer implements ContainerInterface
 
     public function get(string $id): mixed
     {
-        return $this->entries[$id] ?? throw new RuntimeException("Missing test entry {$id}.");
+        if (!array_key_exists($id, $this->entries)) {
+            throw new RuntimeException("Missing test entry {$id}.");
+        }
+
+        return $this->entries[$id];
     }
 
     public function has(string $id): bool
@@ -44,11 +48,13 @@ it('returns a container entry when it matches the requested type', function (): 
     expect($container->get('clock', DateTimeImmutable::class))->toBe($service);
 });
 
-it('can be used as a PSR container directly', function (): void {
+it('can be used as a PSR container directly including null entries', function (): void {
     $service = new DateTimeImmutable();
-    $container = containerValue(['clock' => $service]);
+    $container = containerValue(['clock' => $service, 'nullable' => null]);
 
-    expect($container->get('clock'))->toBe($service);
+    expect($container->get('clock'))->toBe($service)
+        ->and($container->has('nullable'))->toBeTrue()
+        ->and($container->get('nullable'))->toBeNull();
 });
 
 it('returns the default when an optional entry is missing', function (): void {
@@ -74,6 +80,13 @@ it('uses a container entry fallback type to validate an existing entry', functio
 
     expect($container->find('clock', new ContainerEntry('fallback.clock', DateTimeInterface::class)))
         ->toBe($clock);
+});
+
+it('rejects empty container entry identifiers and types', function (): void {
+    expect(fn() => new ContainerEntry(''))
+        ->toThrow(InvalidArgumentException::class, 'id must not be empty')
+        ->and(fn() => new ContainerEntry('service', ''))
+        ->toThrow(InvalidArgumentException::class, 'type must not be empty');
 });
 
 it('resolves a config entry fallback against the same config snapshot', function (): void {

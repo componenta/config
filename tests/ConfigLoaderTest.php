@@ -148,7 +148,7 @@ it('exports LazyValue and captured closure values as self-contained persistent c
         ->and(($loaded->get('plain_callback'))())->toBe('dsn:plain');
 });
 
-it('never serializes build-time environment values', function (): void {
+it('never serializes build-time environment values and secures cache permissions', function (): void {
     $file = configLoaderRuntime() . '/nested/config.php';
     $buildEnvironment = new Environment([
         'APP_ENV' => 'build',
@@ -173,6 +173,11 @@ it('never serializes build-time environment values', function (): void {
         'config' => $original->toArray(),
     ])->and($loaded->environment)->toBe($runtimeEnvironment)
         ->and($loaded->environment->string('DATABASE_PASSWORD'))->toBe('runtime-secret');
+
+    if (PHP_OS_FAMILY !== 'Windows') {
+        clearstatcache(true, $file);
+        expect(fileperms($file) & 0777)->toBe(0600);
+    }
 });
 
 it('can replace an existing cache snapshot', function (): void {

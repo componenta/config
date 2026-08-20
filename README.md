@@ -260,7 +260,7 @@ $config = ConfigLoader::loadFromFile(
 
 DI v5 loads its own dependency cache and reattaches normalized dependencies when it builds the final runtime `Config`. Provider mode and cache mode therefore converge on the same runtime shape without serializing build-time environment or duplicating the DI graph.
 
-Unknown envelope keys, embedded dependency roots and stale cache versions fail fast. Cache files are written via a temporary file, flushed, syntax-checked and atomically activated.
+Unknown envelope keys, embedded dependency roots and stale cache versions fail fast. Cache files are written via a temporary file, flushed, syntax-checked and atomically activated. On POSIX systems the activated cache file is owner-readable/writable only (`0600`).
 
 ## Container helpers
 

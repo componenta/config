@@ -140,6 +140,10 @@ final class ConfigLoader
             }
 
             try {
+                if (PHP_OS_FAMILY !== 'Windows' && !@chmod($temporary, 0600)) {
+                    throw new \RuntimeException('Cannot secure temporary cache file permissions.');
+                }
+
                 self::writeAll($stream, $content);
 
                 if (!fflush($stream)) {
