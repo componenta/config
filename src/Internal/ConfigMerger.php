@@ -96,9 +96,17 @@ final class ConfigMerger
     /** @param array<array-key, mixed> $config */
     private static function assertMergeableDependencies(array $config): void
     {
-        $dependencies = $config[ConfigKey::DEPENDENCIES] ?? null;
-        if (!is_array($dependencies)) {
+        if (!array_key_exists(ConfigKey::DEPENDENCIES, $config)) {
             return;
+        }
+
+        $dependencies = $config[ConfigKey::DEPENDENCIES];
+        if (!is_array($dependencies)) {
+            throw new InvalidArgumentException(sprintf(
+                'Dependency root "%s" must be an array; got %s.',
+                ConfigKey::DEPENDENCIES,
+                get_debug_type($dependencies),
+            ));
         }
 
         $delegators = $dependencies[ConfigKey::DELEGATORS] ?? null;

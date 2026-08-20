@@ -124,6 +124,13 @@ it('rejects non-list delegator pipelines before merge can mutate their shape', f
     ]))->toThrow(InvalidArgumentException::class, 'pipeline list');
 });
 
+it('rejects a non-array dependency root before it can replace valid dependencies', function (): void {
+    expect(fn() => config_merge(
+        [ConfigKey::DEPENDENCIES => [ConfigKey::SERVICES => ['service' => 'ready']]],
+        [ConfigKey::DEPENDENCIES => 'invalid'],
+    ))->toThrow(InvalidArgumentException::class, 'Dependency root');
+});
+
 it('preserves keyed invokables until DI v5 canonicalization', function (): void {
     $merged = config_merge(
         [ConfigKey::DEPENDENCIES => [

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use Componenta\Config\ConfigPath;
 
-it('splits dot paths into stable segments', function (
+it('splits valid dot paths into stable segments', function (
     string $input,
     array $segments,
     bool $nested,
@@ -20,5 +20,13 @@ it('splits dot paths into stable segments', function (
     'single segment' => ['database', ['database'], false],
     'two segments' => ['database.host', ['database', 'host'], true],
     'deep path' => ['database.connections.primary', ['database', 'connections', 'primary'], true],
-    'empty literal segment' => ['', [''], false],
+]);
+
+it('rejects empty paths and empty path segments', function (string $path): void {
+    expect(fn() => new ConfigPath($path))->toThrow(InvalidArgumentException::class);
+})->with([
+    'empty path' => '',
+    'leading empty segment' => '.database',
+    'trailing empty segment' => 'database.',
+    'middle empty segment' => 'database..host',
 ]);
