@@ -116,7 +116,9 @@ $config = new Config([
 ], $environment);
 ```
 
-Lazy results are cached per `Config` or `ContainerValue` context unless `cache: false` is requested. Anonymous source-backed closures with exportable captured values are persisted as self-contained callbacks. Public static methods and methods on exportable readonly objects are also portable. A user-defined named function is rejected during cache export because its definition may have come from a provider file that is not loaded during production cache bootstrap.
+Lazy results are cached per `Config` or `ContainerValue` context unless `cache: false` is requested. Circular resolution in the same runtime context fails fast. Anonymous source-backed closures with exportable captured values are persisted as self-contained callbacks; class scope is preserved only when it can be reconstructed exactly. Public static methods and methods on exportable readonly objects are also portable. A user-defined named function is rejected during cache export because its definition may have come from a provider file that is not loaded during production cache bootstrap.
+
+Plain `Closure` values are supported by persistent cache only when they are global-scope, unbound and otherwise exportable. Class-scoped or bound plain closures are rejected rather than cached with different runtime binding semantics.
 
 ## Dotenv loading
 
@@ -163,7 +165,7 @@ At the root `dependencies` section:
 - delegator pipelines append;
 - replacement flags are scalar and the later explicit value wins.
 
-Outside `dependencies`, normal recursive configuration merge applies: string keys recurse/replace and numeric keys append. Unknown DI sections and malformed dependency roots, array/bool sections or delegator pipelines fail before merge can change their meaning.
+Outside `dependencies`, two true PHP lists append. Other arrays are maps: both string and integer key identity is preserved, same-key nested arrays merge recursively, and later scalar values replace earlier ones. Unknown DI sections and malformed dependency roots, array/bool sections or delegator pipelines fail before merge can change their meaning. Excessively deep recursive graphs fail fast instead of exhausting the stack.
 
 A class-method callable pair must be nested as one delegator pipeline item:
 
@@ -224,7 +226,7 @@ $config = ConfigLoader::loadFromFile(
 
 DI v5 loads its own dependency cache and reattaches normalized dependencies when it builds the final runtime `Config`. Provider mode and cache mode therefore converge on the same runtime shape without serializing build-time environment or duplicating the DI graph.
 
-Unknown envelope keys, embedded dependency roots and stale cache versions fail fast. Cache files are written via a temporary file, flushed, syntax-checked and atomically activated. File ownership and permissions are deployment concerns and follow the process/filesystem policy (including umask); configure them so the runtime user can read the cache while keeping sensitive literal configuration appropriately protected.
+Unknown envelope keys, embedded dependency roots, stale cache versions and graphs beyond the supported exporter depth fail fast. Cache files are written via a temporary file, flushed, syntax-checked and atomically activated. File ownership and permissions are deployment concerns and follow the process/filesystem policy (including umask); configure them so the runtime user can read the cache while keeping sensitive literal configuration appropriately protected.
 
 ## Container helpers
 
