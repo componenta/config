@@ -69,7 +69,11 @@ final class EnvLoader implements EnvLoaderInterface
         $loaded = $this->read() ?? [];
 
         if ($loaded !== []) {
-            $this->populateEnvironment($loaded, $override);
+            $this->populateEnvironment(
+                $loaded,
+                Environment::fromGlobals(),
+                $override,
+            );
         }
 
         $environment = Environment::fromGlobals();
@@ -235,22 +239,18 @@ final class EnvLoader implements EnvLoaderInterface
     }
 
     /** @param array<string, string> $data */
-    private function populateEnvironment(array $data, bool $override): void
-    {
+    private function populateEnvironment(
+        array $data,
+        Environment $existing,
+        bool $override,
+    ): void {
         foreach ($data as $key => $value) {
-            if (!$override && $this->environmentKeyExists($key)) {
+            if (!$override && $existing->has($key)) {
                 continue;
             }
 
             $_ENV[$key] = $value;
         }
-    }
-
-    private function environmentKeyExists(string $key): bool
-    {
-        return array_key_exists($key, $_ENV)
-            || array_key_exists($key, $_SERVER)
-            || getenv($key) !== false;
     }
 
     /** @param array<string, mixed> $effective */

@@ -14,7 +14,7 @@ function envLoaderRuntime(): string
 
 function clearEnvLoaderKeys(): void
 {
-    foreach (['APP_ENV', 'APP_NAME', 'DEBUG', 'BASE', 'LOCAL', 'KEY', 'MESSAGE', 'ESCAPED', 'FILE_ONLY', 'PROCESS_ONLY', 'IGNORED_SAMPLE'] as $key) {
+    foreach (['APP_ENV', 'APP_NAME', 'DEBUG', 'BASE', 'LOCAL', 'KEY', 'MESSAGE', 'ESCAPED', 'FILE_ONLY', 'PROCESS_ONLY', 'IGNORED_SAMPLE', 'INVALID_SERVER'] as $key) {
         unset($_ENV[$key], $_SERVER[$key]);
         putenv($key);
     }
@@ -70,6 +70,16 @@ it('keeps deployment environment precedence unless override is requested', funct
 
     $overridden = (new EnvLoader(envLoaderRuntime()))->load(override: true);
     expect($overridden->string('APP_ENV'))->toBe('file');
+});
+
+it('does not let unsupported server values mask valid dotenv values', function (): void {
+    file_put_contents(envLoaderRuntime() . '/.env', "INVALID_SERVER=file\n");
+    $_SERVER['INVALID_SERVER'] = ['not', 'an', 'environment', 'scalar'];
+
+    $environment = (new EnvLoader(envLoaderRuntime()))->load();
+
+    expect($_ENV['INVALID_SERVER'])->toBe('file')
+        ->and($environment->string('INVALID_SERVER'))->toBe('file');
 });
 
 it('loads dotenv values into env without mirroring them into server globals', function (): void {
