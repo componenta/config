@@ -125,6 +125,21 @@ it('rejects malformed delegator sections and pipelines before merge can mutate t
         ]))->toThrow(InvalidArgumentException::class, 'pipeline list');
 });
 
+it('rejects unsupported and structurally invalid DI v5 sections before merge', function (): void {
+    expect(fn() => config_merge([], [
+        ConfigKey::DEPENDENCIES => ['extension' => []],
+    ]))->toThrow(InvalidArgumentException::class, 'Unsupported DI v5 dependency section')
+        ->and(fn() => config_merge([], [
+            ConfigKey::DEPENDENCIES => [ConfigKey::FACTORIES => 'invalid'],
+        ]))->toThrow(InvalidArgumentException::class, 'must be an array')
+        ->and(fn() => config_merge([], [
+            ConfigKey::DEPENDENCIES => [ConfigKey::PARAMETER_RESOLVERS_REPLACE => 1],
+        ]))->toThrow(InvalidArgumentException::class, 'must be bool')
+        ->and(fn() => config_merge([], [
+            ConfigKey::DEPENDENCIES => [0 => []],
+        ]))->toThrow(InvalidArgumentException::class, 'Unsupported DI v5 dependency section');
+});
+
 it('rejects a non-array dependency root before it can replace valid dependencies', function (): void {
     expect(fn() => config_merge(
         [ConfigKey::DEPENDENCIES => [ConfigKey::SERVICES => ['service' => 'ready']]],

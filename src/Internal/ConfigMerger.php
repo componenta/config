@@ -26,6 +26,24 @@ final class ConfigMerger
         ConfigKey::PARAMETER_RESOLVERS => true,
     ];
 
+    /** @var array<string, true> */
+    private const array ARRAY_DEPENDENCY_SECTIONS = [
+        ConfigKey::FACTORIES => true,
+        ConfigKey::INVOKABLES => true,
+        ConfigKey::ALIASES => true,
+        ConfigKey::DELEGATORS => true,
+        ConfigKey::SERVICES => true,
+        ConfigKey::PARAMETER_RESOLVERS => true,
+        ConfigKey::ATTRIBUTE_DEFINITIONS => true,
+        ConfigKey::ATTRIBUTE_CAPABILITIES => true,
+    ];
+
+    /** @var array<string, true> */
+    private const array BOOL_DEPENDENCY_SECTIONS = [
+        ConfigKey::PARAMETER_RESOLVERS_REPLACE => true,
+        ConfigKey::ATTRIBUTE_DEFINITIONS_REPLACE => true,
+    ];
+
     public static function merge(array $base, array $override): array
     {
         self::assertMergeableDependencies($base);
@@ -109,18 +127,39 @@ final class ConfigMerger
             ));
         }
 
+        $allowed = array_fill_keys(ConfigKey::dependencyKeys(), true);
+
+        foreach ($dependencies as $key => $value) {
+            if (!is_string($key) || !isset($allowed[$key])) {
+                throw new InvalidArgumentException(sprintf(
+                    'Unsupported DI v5 dependency section "%s".',
+                    (string) $key,
+                ));
+            }
+
+            if (isset(self::ARRAY_DEPENDENCY_SECTIONS[$key]) && !is_array($value)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Dependency section "%s" must be an array; got %s.',
+                    $key,
+                    get_debug_type($value),
+                ));
+            }
+
+            if (isset(self::BOOL_DEPENDENCY_SECTIONS[$key]) && !is_bool($value)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Dependency section "%s" must be bool; got %s.',
+                    $key,
+                    get_debug_type($value),
+                ));
+            }
+        }
+
         if (!array_key_exists(ConfigKey::DELEGATORS, $dependencies)) {
             return;
         }
 
+        /** @var array<array-key, mixed> $delegators */
         $delegators = $dependencies[ConfigKey::DELEGATORS];
-        if (!is_array($delegators)) {
-            throw new InvalidArgumentException(sprintf(
-                'Dependency section "%s" must be an array; got %s.',
-                ConfigKey::DELEGATORS,
-                get_debug_type($delegators),
-            ));
-        }
 
         foreach ($delegators as $id => $pipeline) {
             if (!is_string($id) || $id === '') {
