@@ -18,7 +18,7 @@ use Throwable;
  */
 final class ConfigLoader
 {
-    public const int CACHE_VERSION = 2;
+    public const int CACHE_VERSION = 3;
 
     /** @var array<string, true> */
     private const array CACHE_KEYS = [

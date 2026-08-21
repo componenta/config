@@ -204,6 +204,10 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
 
     private function resolveValue(mixed $value): mixed
     {
+        if ($value instanceof EnvironmentEntry) {
+            return $value->resolve($this->environment);
+        }
+
         if ($value instanceof LazyValue) {
             return $value->resolve($this);
         }

@@ -8,8 +8,6 @@ use Componenta\Config\Environment;
 use Componenta\Config\Exception\EnvLoaderException;
 use InvalidArgumentException;
 
-use function Componenta\Config\populate_env;
-
 /**
  * Loads explicitly named dotenv files from one or more directories.
  *
@@ -71,7 +69,7 @@ final class EnvLoader implements EnvLoaderInterface
         $loaded = $this->read() ?? [];
 
         if ($loaded !== []) {
-            populate_env($loaded, $override);
+            $this->populateEnvironment($loaded, $override);
         }
 
         $environment = Environment::fromGlobals();
@@ -234,6 +232,25 @@ final class EnvLoader implements EnvLoaderInterface
             '\\t' => "\t",
             '\\"' => '"',
         ]);
+    }
+
+    /** @param array<string, string> $data */
+    private function populateEnvironment(array $data, bool $override): void
+    {
+        foreach ($data as $key => $value) {
+            if (!$override && $this->environmentKeyExists($key)) {
+                continue;
+            }
+
+            $_ENV[$key] = $value;
+        }
+    }
+
+    private function environmentKeyExists(string $key): bool
+    {
+        return array_key_exists($key, $_ENV)
+            || array_key_exists($key, $_SERVER)
+            || getenv($key) !== false;
     }
 
     /** @param array<string, mixed> $effective */

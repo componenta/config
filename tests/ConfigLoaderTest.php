@@ -10,6 +10,8 @@ use Componenta\Config\Environment;
 use Componenta\Config\Exception\ConfigException;
 use Componenta\Config\LazyValue;
 
+use function Componenta\Config\env;
+
 function configLoaderRuntime(): string
 {
     static $path;
@@ -101,6 +103,34 @@ it('keeps application config behavior identical between provider and cache loadi
         ->and($cachedConfig->environment->string('DATABASE_HOST'))->toBe('runtime-db');
 });
 
+it('keeps environment-backed config runtime-bound and out of persistent cache', function (): void {
+    $file = configLoaderRuntime() . '/runtime-env.php';
+    $config = new Config([
+        'password' => env('DATABASE_PASSWORD'),
+        'port' => env('DATABASE_PORT', '3306'),
+    ], new Environment([
+        'DATABASE_PASSWORD' => 'build-secret',
+        'DATABASE_PORT' => '3307',
+    ]));
+
+    expect($config->string('password'))->toBe('build-secret')
+        ->and($config->int('port'))->toBe(3307);
+
+    ConfigLoader::export($config, $file);
+
+    $contents = file_get_contents($file);
+    expect($contents)->toBeString()
+        ->and($contents)->not->toContain('build-secret')
+        ->and($contents)->not->toContain('3307');
+
+    $loaded = ConfigLoader::loadFromFile($file, new Environment([
+        'DATABASE_PASSWORD' => 'runtime-secret',
+    ]));
+
+    expect($loaded->string('password'))->toBe('runtime-secret')
+        ->and($loaded->int('port'))->toBe(3306);
+});
+
 it('keeps DI dependencies out of the application config cache', function (): void {
     $file = configLoaderRuntime() . '/without-dependencies.php';
     $config = new Config([
@@ -148,7 +178,7 @@ it('exports LazyValue and captured closure values as self-contained persistent c
         ->and(($loaded->get('plain_callback'))())->toBe('dsn:plain');
 });
 
-it('never serializes build-time environment values and secures cache permissions', function (): void {
+it('never serializes the Environment snapshot and secures cache permissions', function (): void {
     $file = configLoaderRuntime() . '/nested/config.php';
     $buildEnvironment = new Environment([
         'APP_ENV' => 'build',
@@ -207,7 +237,10 @@ it('rejects unsupported cache envelopes versions and embedded DI roots', functio
         ->toThrow(ConfigException::class, 'Unsupported configuration cache envelope key');
 
     $stale = configLoaderRuntime() . '/stale.php';
-    file_put_contents($stale, "<?php return ['version' => 1, 'config' => []];");
+    file_put_contents(
+        $stale,
+        "<?php return ['version' => " . (ConfigLoader::CACHE_VERSION - 1) . ", 'config' => []];",
+    );
     expect(fn() => ConfigLoader::loadFromFile($stale, $environment))
         ->toThrow(ConfigException::class, 'Unsupported configuration cache version');
 

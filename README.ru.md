@@ -1,83 +1,50 @@
 # Componenta Config
 
-`componenta/config` — configuration runtime для Componenta DI v5 на PHP 8.4+. Пакет предоставляет immutable snapshots конфигурации и environment, детерминированную композицию providers, typed reads, явные lazy values, file providers и версионированный persistent cache конфигурации приложения.
+`componenta/config` — configuration runtime для Componenta DI v5 на PHP 8.4+. Пакет предоставляет immutable snapshots конфигурации и environment, детерминированную композицию providers, typed reads, runtime-bound environment references, явные lazy values, file providers и версионированный persistent cache конфигурации приложения.
 
 В пакете нет compatibility layer для старых DI schemas и нет собственного dev/prod режима. Bootstrap-слой решает, брать данные из providers или из persistent cache.
 
-## Установка
-
-```bash
-composer require componenta/config
-```
-
 ## Runtime model
 
-`Config` всегда содержит ровно один `Environment` snapshot:
+`Config` всегда содержит ровно один `Environment` snapshot. `Environment` остаётся частью runtime `Config`, но никогда не сериализуется в persistent cache.
 
-```php
-use Componenta\Config\Config;
-use Componenta\Config\Environment;
-
-$environment = Environment::fromGlobals();
-$config = new Config([
-    'app' => ['name' => 'Example'],
-], $environment);
-```
-
-`Environment` остаётся частью runtime `Config`, но никогда не сериализуется в persistent cache.
-
-Обычный string key является literal key. Для nested lookup используется `ConfigPath`:
-
-```php
-use function Componenta\Config\path;
-
-$config->get('database.host');
-$config->get(path('database.host'));
-```
-
-`ConfigPath` должен содержать один или несколько непустых сегментов, разделённых точкой.
-
-Integer top-level keys одинаково поддерживаются `get()`, `has()`, `only()`, `except()`, `ConfigEntry` и read-only `ArrayAccess`.
+Обычный string key является literal key; для nested lookup используется `ConfigPath`. `ConfigPath` должен содержать непустые dot-separated segments. Integer top-level keys одинаково поддерживаются `get()`, `has()`, `only()`, `except()`, `ConfigEntry` и read-only `ArrayAccess`.
 
 ## Typed reads
 
-```php
-$config->string('name');
-$config->int('port');
-$config->float('ratio');
-$config->bool('enabled');
-$config->array('hosts');
-```
+Доступны `string()`, `int()`, `float()`, `bool()`, `array()`. Integer conversion выполняется без потери данных: fractional, overflow, scientific integer strings и non-finite values отклоняются. Missing key без default приводит к исключению, а сохранённый `null` считается существующим значением.
 
-Integer conversion выполняется без потери данных: дробные значения, overflow, scientific integer strings и non-finite values отклоняются, а не усекаются.
+## Runtime-bound environment values
 
-Missing key без default приводит к исключению. Сохранённый `null` считается существующим значением.
-
-## Defaults и lazy values
-
-Для fallback на другой config key используется `ConfigEntry`:
+Provider не должен вычислять deployment environment при построении persistent config. `env()` создаёт `EnvironmentEntry` descriptor:
 
 ```php
-$name = $config->string(
-    'display_name',
-    config_entry(path('app.name')),
-);
+return [
+    'database' => [
+        'host' => env('DATABASE_HOST'),
+        'port' => env('DATABASE_PORT', '3306'),
+        'debug' => env('APP_DEBUG', 'false'),
+    ],
+];
 ```
 
-Обычный callable является обычным значением. Для явного lazy evaluation используется `LazyValue`:
+`env()` не читает globals. Descriptor разрешается через `Config::$environment` только при чтении значения:
 
 ```php
-$config = new Config([
-    'dsn' => lazy(
-        static fn (Config $config): string =>
-            'mysql:host=' . $config->string('host'),
-    ),
-]);
+$config->string(path('database.host'));
+$config->int(path('database.port'));
+$config->bool(path('database.debug'));
 ```
 
-Lazy result кэшируется отдельно для каждого `Config`/`ContainerValue`, если не указан `cache: false`. Persistent config cache сохраняет семантику `LazyValue`; захваченные exportable values инлайнятся при build, поэтому cached callback является self-contained.
+В provider и cache modes используется один и тот же runtime `Environment`; persistent cache содержит descriptor, а не build-time value. Поэтому `env()` не может заморозить build secret в cache.
 
-## Runtime environment
+Для прямого runtime-доступа используется сам `Environment`:
+
+```php
+$environment->string('APP_ENV');
+$environment->bool('APP_DEBUG', false);
+$environment->int('PORT', 8080);
+```
 
 `Environment::fromGlobals()` использует приоритет:
 
@@ -85,21 +52,17 @@ Lazy result кэшируется отдельно для каждого `Config`
 process environment < $_SERVER < $_ENV
 ```
 
-Доступны `string()`, `int()`, `float()`, `bool()`, `array()`. `ConfigPath` преобразуется в `UPPER_SNAKE_CASE`.
+## ConfigEntry и LazyValue
 
-`env()` возвращает raw value. Typed helpers выполняют преобразование явно. `env_string()` сохраняет lexical strings вроде `001`, `true`, `false`.
+`ConfigEntry` используется для fallback на другой config key. `LazyValue` — для явного lazy evaluation. Lazy result кэшируется отдельно для каждого `Config`/`ContainerValue`, если не указан `cache: false`.
+
+Persistent cache поддерживает anonymous source-backed closures с exportable captured values, public static methods и методы exportable readonly objects. User-defined named function отклоняется во время cache export: его definition может находиться в provider-файле, который production bootstrap уже не загружает.
 
 ## Dotenv
 
-`EnvLoader` по умолчанию читает только `.env`, затем `.env.local`, и всегда возвращает effective runtime `Environment`.
+`EnvLoader` по умолчанию читает только `.env`, затем `.env.local`, и всегда возвращает effective runtime `Environment`. Deployment values имеют приоритет, пока явно не передан `override: true`. Dotenv записывается только в `$_ENV`; `$_SERVER` не изменяется. Sample/backup и остальные `.env*` файлы не подхватываются автоматически.
 
-```php
-$environment = (new EnvLoader('.'))->load();
-```
-
-Deployment values имеют приоритет, пока явно не передан `override: true`. Dotenv записывается только в `$_ENV`; `$_SERVER` не изменяется. Sample/backup и остальные `.env*` файлы не подхватываются автоматически.
-
-`read()` не изменяет globals. Required variables могут приходить как из dotenv, так и из deployment environment. Ошибки парсинга никогда не включают значения из dotenv в диагностическое сообщение.
+`read()` не изменяет globals. Required variables могут приходить как из dotenv, так и из deployment environment. Ошибки парсинга никогда не включают значения из dotenv в diagnostic message.
 
 ## Provider composition для DI v5
 
@@ -120,9 +83,7 @@ shouldReplaceAttributeDefinitions()
 getAttributeCapabilities()
 ```
 
-`getConfig()` не может определять reserved root `dependencies`.
-
-Replacement hooks имеют tri-state семантику: `true`/`false` — явное значение, `null` — provider не изменяет уже составленное значение.
+`getConfig()` не может определять reserved root `dependencies`. Replacement hooks имеют tri-state семантику: `true`/`false` — explicit value, `null` — provider не меняет ранее составленное значение.
 
 ### Merge semantics
 
@@ -134,56 +95,30 @@ Replacement hooks имеют tri-state семантику: `true`/`false` — я
 - delegator pipelines append-ятся;
 - поздний explicit replacement flag побеждает.
 
-За пределами dependency root применяется обычный recursive config merge. Некорректный scalar dependency root и malformed delegator pipeline отклоняются до merge.
-
-Callable pair delegator обязательно является вложенным pipeline item:
-
-```php
-return [
-    Service::class => [
-        [MetricsDelegator::class, 'decorate'],
-    ],
-];
-```
+За пределами dependency root применяется normal recursive config merge. Malformed dependency root/delegator pipeline отклоняются до merge. Class-method callable pair должна быть вложенным pipeline item.
 
 ## File providers
 
-`FileProvider` поддерживает PHP и JSON. Файлы обрабатываются в отсортированном порядке. JSON integers за пределами platform int range сохраняются как точные строки, а не imprecise float. Ошибки чтения, парсинга и unsupported matched files приводят к fail-fast.
+`FileProvider` поддерживает PHP и JSON. Файлы обрабатываются в отсортированном порядке. JSON integers за пределами platform int range сохраняются как точные строки. Ошибки чтения, парсинга и unsupported matched files приводят к fail-fast.
 
 ## Persistent application-config cache
 
-Config cache хранит только application/package configuration. Из него намеренно исключаются:
+Config cache хранит только application/package configuration. Из него намеренно исключаются runtime `Environment` и reserved root `dependencies`, которым владеет DI v5 `DiCacheGenerator`.
 
-- runtime `Environment`;
-- reserved root `dependencies`, которым владеет отдельный DI v5 `DiCacheGenerator`.
+`EnvironmentEntry`, созданный `env()`, сохраняется как descriptor: runtime value и secret в cache не записываются.
 
 ```php
 ConfigLoader::export($config, 'var/cache/config.php');
-```
 
-Envelope версионирован и содержит только application/package data:
-
-```php
-return [
-    'version' => ConfigLoader::CACHE_VERSION,
-    'config' => [
-        // application/package configuration only
-    ],
-];
-```
-
-При загрузке передаётся текущий runtime environment:
-
-```php
 $config = ConfigLoader::loadFromFile(
     'var/cache/config.php',
     Environment::fromGlobals(),
 );
 ```
 
-DI v5 загружает собственный dependency cache и при build снова добавляет normalized dependencies в итоговый runtime `Config`. Поэтому provider и cache modes сходятся к одной runtime shape без build-time environment и без дублирования DI graph.
+DI v5 загружает собственный dependency cache и при build снова добавляет normalized dependencies в итоговый runtime `Config`. Provider/cache modes сходятся к одной runtime shape без build-time environment и без дублирования DI graph.
 
-Неизвестные envelope keys, embedded dependency root и stale cache version отклоняются. На POSIX активированный cache-файл имеет права `0600`.
+Unknown envelope keys, embedded dependency root и stale cache version отклоняются. На POSIX активированный cache-файл имеет права `0600`.
 
 ## Container helpers
 

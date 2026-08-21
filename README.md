@@ -1,6 +1,6 @@
 # Componenta Config
 
-`componenta/config` is the configuration runtime used by Componenta DI v5. It targets PHP 8.4+ and provides immutable configuration/environment snapshots, deterministic provider composition, typed reads, explicit lazy values, file providers and versioned persistent application-config cache.
+`componenta/config` is the configuration runtime used by Componenta DI v5. It targets PHP 8.4+ and provides immutable configuration/environment snapshots, deterministic provider composition, typed reads, runtime-bound environment references, explicit lazy values, file providers and versioned persistent application-config cache.
 
 There is no compatibility layer for older DI schemas and no development/production mode inside this package. The bootstrap layer decides whether configuration data comes from providers or from a persistent cache.
 
@@ -35,9 +35,7 @@ $config->get('database.host');       // literal key
 $config->get(path('database.host')); // nested path
 ```
 
-`ConfigPath` must contain one or more non-empty dot-separated segments.
-
-Integer top-level keys are also supported consistently by `get()`, `has()`, `only()`, `except()`, `ConfigEntry` and read-only `ArrayAccess`.
+`ConfigPath` must contain one or more non-empty dot-separated segments. Integer top-level keys are supported consistently by `get()`, `has()`, `only()`, `except()`, `ConfigEntry` and read-only `ArrayAccess`.
 
 ## Typed reads
 
@@ -49,9 +47,48 @@ $config->bool('enabled');
 $config->array('hosts');
 ```
 
-Integer conversion is lossless: fractional, overflow, scientific integer strings and non-finite values are rejected rather than truncated.
+Integer conversion is lossless: fractional, overflow, scientific integer strings and non-finite values are rejected rather than truncated. Missing keys throw unless a default is supplied; a stored `null` is an existing value.
 
-Missing keys throw unless a default is supplied. A stored `null` is an existing value.
+## Runtime-bound environment values
+
+Provider configuration must not read deployment environment eagerly. Use `env()` to store an `EnvironmentEntry` descriptor:
+
+```php
+use function Componenta\Config\env;
+
+return [
+    'database' => [
+        'host' => env('DATABASE_HOST'),
+        'port' => env('DATABASE_PORT', '3306'),
+        'debug' => env('APP_DEBUG', 'false'),
+    ],
+];
+```
+
+`env()` does **not** read `$_ENV`, `$_SERVER` or the process environment. The descriptor is resolved against the `Environment` belonging to the current `Config` when the value is read:
+
+```php
+$config->string(path('database.host'));
+$config->int(path('database.port'));
+$config->bool(path('database.debug'));
+```
+
+This is the same in provider and cache modes: config cache stores the descriptor, never the resolved environment value. Build-time secrets therefore cannot be frozen into application config by `env()`.
+
+For direct runtime environment access use the immutable snapshot itself:
+
+```php
+$environment->string('APP_ENV');
+$environment->bool('APP_DEBUG', false);
+$environment->int('PORT', 8080);
+$environment->string(path('database.host')); // DATABASE_HOST
+```
+
+`Environment::fromGlobals()` composes values with this precedence:
+
+```text
+process environment < $_SERVER < $_ENV
+```
 
 ## Defaults and lazy values
 
@@ -72,63 +109,18 @@ Plain callables are ordinary values. Explicit lazy evaluation uses `LazyValue`:
 use function Componenta\Config\lazy;
 
 $config = new Config([
-    'host' => 'localhost',
     'dsn' => lazy(
         static fn (Config $config): string =>
             'mysql:host=' . $config->string('host'),
     ),
-]);
+], $environment);
 ```
 
-Lazy results are cached per `Config` or `ContainerValue` context unless `cache: false` is requested. Persistent config cache preserves `LazyValue` semantics; captured exportable values are inlined so the cached callback is self-contained.
-
-## Runtime environment
-
-`Environment` is an immutable snapshot. `Environment::fromGlobals()` composes values with this precedence:
-
-```text
-process environment < $_SERVER < $_ENV
-```
-
-Typed reads are available directly on the snapshot:
-
-```php
-$environment->string('APP_ENV');
-$environment->bool('APP_DEBUG', false);
-$environment->int('PORT', 8080);
-```
-
-A `ConfigPath` maps to upper snake case:
-
-```php
-$environment->string(path('database.host')); // DATABASE_HOST
-```
-
-### Environment helpers
-
-`env()` returns the raw value. Type conversion is always explicit:
-
-```php
-use function Componenta\Config\env;
-use function Componenta\Config\env_array;
-use function Componenta\Config\env_bool;
-use function Componenta\Config\env_float;
-use function Componenta\Config\env_int;
-use function Componenta\Config\env_string;
-
-$raw = env('PORT');              // "8080"
-$port = env_int('PORT', 8080);   // 8080
-$name = env_string('APP_NAME');
-$debug = env_bool('APP_DEBUG', false);
-$ratio = env_float('RATIO', 1.0);
-$hosts = env_array('HOSTS', []);
-```
-
-`env_string()` preserves lexical strings such as `001`, `true` and `false`.
+Lazy results are cached per `Config` or `ContainerValue` context unless `cache: false` is requested. Anonymous source-backed closures with exportable captured values are persisted as self-contained callbacks. Public static methods and methods on exportable readonly objects are also portable. A user-defined named function is rejected during cache export because its definition may have come from a provider file that is not loaded during production cache bootstrap.
 
 ## Dotenv loading
 
-`EnvLoader` loads `.env` and `.env.local` in that order. It always returns the effective runtime `Environment` snapshot:
+`EnvLoader` loads `.env` and `.env.local` in that order and always returns the effective runtime `Environment` snapshot:
 
 ```php
 use Componenta\Config\Loader\EnvLoader;
@@ -136,13 +128,7 @@ use Componenta\Config\Loader\EnvLoader;
 $environment = (new EnvLoader('.'))->load();
 ```
 
-Existing deployment values remain authoritative unless `override: true` is requested:
-
-```php
-$environment = (new EnvLoader('.'))->load(override: true);
-```
-
-Dotenv data is written only to `$_ENV`; `$_SERVER` is not mutated. `.env.example`, backup files and other `.env*` files are not loaded implicitly. Alternative basenames must be listed explicitly.
+Existing deployment values remain authoritative unless `override: true` is requested. Dotenv data is written only to `$_ENV`; `$_SERVER` is not mutated. `.env.example`, backup files and other `.env*` files are not loaded implicitly. Alternative basenames must be listed explicitly.
 
 `read()` is pure and does not mutate runtime globals. Required variables may come from dotenv or deployment environment. Parse errors never include dotenv values in diagnostic messages.
 
@@ -165,18 +151,7 @@ shouldReplaceAttributeDefinitions()
 getAttributeCapabilities()
 ```
 
-`getConfig()` cannot define the reserved root key `dependencies`.
-
-Replacement hooks are tri-state:
-
-```php
-protected function shouldReplaceParameterResolvers(): ?bool
-{
-    return true; // true/false = explicit value, null = no opinion
-}
-```
-
-This prevents an inherited default from accidentally cancelling an earlier provider.
+`getConfig()` cannot define the reserved root key `dependencies`. Replacement hooks are tri-state: `true`/`false` are explicit values, while `null` means that provider has no opinion and does not cancel an earlier value.
 
 ### Merge semantics
 
@@ -188,26 +163,17 @@ At the root `dependencies` section:
 - delegator pipelines append;
 - replacement flags are scalar and the later explicit value wins.
 
-Outside `dependencies`, normal recursive configuration merge applies: string keys recurse/replace and numeric keys append.
+Outside `dependencies`, normal recursive configuration merge applies: string keys recurse/replace and numeric keys append. Malformed non-array dependency roots and malformed delegator pipelines fail before merge can change their shape.
 
-Malformed non-array dependency roots and malformed delegator pipelines fail before merge can change their shape.
-
-### Delegator pipelines
-
-A delegator callable pair must be an item inside the pipeline:
+A class-method callable pair must be nested as one delegator pipeline item:
 
 ```php
-protected function getDelegators(): array
-{
-    return [
-        Service::class => [
-            [MetricsDelegator::class, 'decorate'],
-        ],
-    ];
-}
+return [
+    Service::class => [
+        [MetricsDelegator::class, 'decorate'],
+    ],
+];
 ```
-
-A direct callable pair such as `[MetricsDelegator::class, 'decorate']` is rejected because its meaning would otherwise change when multiple providers are merged.
 
 ## File providers
 
@@ -227,10 +193,10 @@ Custom formats implement `Componenta\Config\Reader\FileReaderInterface`.
 
 The config cache owns only application/package configuration. It deliberately excludes two runtime/bootstrap concerns:
 
-- `Environment` is read at runtime and is never serialized;
+- the `Environment` snapshot is supplied at runtime and is never serialized;
 - the reserved `dependencies` root belongs to DI v5 and is stored by `DiCacheGenerator`, not by `ConfigLoader`.
 
-Build the application-config cache:
+Runtime-bound `EnvironmentEntry` values created by `env()` are persisted as descriptors, so their resolved values and secrets are not written into the cache.
 
 ```php
 ConfigLoader::export($config, 'var/cache/config.php');
@@ -250,11 +216,9 @@ return [
 Load it with the current runtime environment:
 
 ```php
-$environment = Environment::fromGlobals();
-
 $config = ConfigLoader::loadFromFile(
     'var/cache/config.php',
-    $environment,
+    Environment::fromGlobals(),
 );
 ```
 
@@ -264,20 +228,7 @@ Unknown envelope keys, embedded dependency roots and stale cache versions fail f
 
 ## Container helpers
 
-`ContainerValue` wraps a PSR-11 container and carries the same `Config` snapshot:
-
-```php
-use Componenta\Config\ContainerValue;
-use function Componenta\Config\entry;
-
-$value = new ContainerValue($container, $config);
-
-$service = $value->get(ServiceInterface::class);
-$optional = $value->find('optional.service', default: null);
-$clock = $value->find('clock', entry('fallback.clock', ClockInterface::class));
-```
-
-When `Config` is not passed explicitly, the wrapped DI v5 container must expose `Config::class`; a missing bootstrap config fails fast.
+`ContainerValue` wraps a PSR-11 container and carries the same `Config` snapshot. When `Config` is not passed explicitly, the wrapped DI v5 container must expose `Config::class`; a missing bootstrap config fails fast.
 
 ## Requirements
 
