@@ -66,7 +66,7 @@ Persistent cache поддерживает anonymous source-backed closures с ex
 
 ## Provider composition для DI v5
 
-`ConfigProvider` транспортирует schema, которую потребляет DI v5. Семантическая validation/canonicalization остаётся ответственностью DI.
+`ConfigProvider` транспортирует точные dependency sections, которые потребляет DI v5. Config проверяет только structural invariants, необходимые для детерминированной композиции: известные имена sections, array/bool shapes и composable delegator pipelines. Семантическая validation/canonicalization значений внутри этих sections остаётся ответственностью DI v5.
 
 Hooks:
 
@@ -95,7 +95,7 @@ getAttributeCapabilities()
 - delegator pipelines append-ятся;
 - поздний explicit replacement flag побеждает.
 
-За пределами dependency root применяется normal recursive config merge. Malformed dependency root/delegator pipeline отклоняются до merge. Class-method callable pair должна быть вложенным pipeline item.
+За пределами dependency root применяется normal recursive config merge. Unknown DI sections и malformed dependency root, array/bool sections или delegator pipelines отклоняются до merge, чтобы их смысл не мог измениться при композиции. Class-method callable pair должна быть вложенным pipeline item.
 
 ## File providers
 
@@ -118,11 +118,11 @@ $config = ConfigLoader::loadFromFile(
 
 DI v5 загружает собственный dependency cache и при build снова добавляет normalized dependencies в итоговый runtime `Config`. Provider/cache modes сходятся к одной runtime shape без build-time environment и без дублирования DI graph.
 
-Unknown envelope keys, embedded dependency root и stale cache version отклоняются. На POSIX активированный cache-файл имеет права `0600`.
+Unknown envelope keys, embedded dependency root и stale cache version отклоняются. Cache-файл создаётся через temporary file, flush, syntax check и atomic rename. Ownership и permissions — политика deployment-а и следуют настройкам filesystem/umask процесса; их нужно настроить так, чтобы runtime user мог читать cache, а literal sensitive configuration была защищена.
 
 ## Container helpers
 
-`ContainerValue` оборачивает PSR-11 container и использует тот же `Config` snapshot. Если `Config` не передан явно, wrapped DI v5 container обязан предоставлять `Config::class`; нарушение bootstrap contract приводит к fail-fast.
+`ContainerValue` оборачивает PSR-11 container и использует тот же `Config` snapshot. Fallbacks поддерживают `ContainerEntry`, `ConfigEntry`, `EnvironmentEntry` и `LazyValue`. Если `Config` не передан явно, wrapped DI v5 container обязан предоставлять `Config::class`; нарушение bootstrap contract приводит к fail-fast.
 
 ## Требования
 
