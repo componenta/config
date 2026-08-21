@@ -103,18 +103,19 @@ final readonly class ConfigCacheObjectExporter implements ObjectExporterInterfac
 
         $scope = $reflection->getClosureScopeClass();
         if ($scope !== null) {
-            $method = new ReflectionMethod($scope->getName(), $reflection->getName());
+            $calledClass = $reflection->getClosureCalledClass() ?? $scope;
+            $method = new ReflectionMethod($calledClass->getName(), $reflection->getName());
             if (!$method->isPublic() || !$method->isStatic()) {
                 throw new RuntimeException(sprintf(
                     'Cannot persist LazyValue callback %s::%s(): method must be public static.',
-                    $scope->getName(),
+                    $calledClass->getName(),
                     $method->getName(),
                 ));
             }
 
             return sprintf(
                 'static fn($context) => \\%s::%s($context)',
-                ltrim($scope->getName(), '\\'),
+                ltrim($calledClass->getName(), '\\'),
                 $method->getName(),
             );
         }

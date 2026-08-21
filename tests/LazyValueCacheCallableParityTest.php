@@ -13,9 +13,17 @@ function lazyValueNamedCallable(Config $config): string
     return 'named:' . $config->environment->string('LAZY_VALUE_ENV');
 }
 
-final class LazyValueStaticCallable
+class LazyValueStaticBaseCallable
 {
     public static function resolve(Config $config): string
+    {
+        return static::class . ':' . $config->environment->string('LAZY_VALUE_ENV');
+    }
+}
+
+final class LazyValueStaticCallable extends LazyValueStaticBaseCallable
+{
+    public static function direct(Config $config): string
     {
         return 'static:' . $config->environment->string('LAZY_VALUE_ENV');
     }
@@ -34,7 +42,8 @@ it('preserves autoloadable method LazyValue callables through persistent cache',
 
     try {
         $config = new Config([
-            'static' => new LazyValue([LazyValueStaticCallable::class, 'resolve']),
+            'static' => new LazyValue([LazyValueStaticCallable::class, 'direct']),
+            'inherited-static' => new LazyValue([LazyValueStaticCallable::class, 'resolve']),
             'object' => new LazyValue([new LazyValueObjectCallable(), 'resolve']),
         ], new Environment(['LAZY_VALUE_ENV' => 'build']));
 
@@ -46,6 +55,8 @@ it('preserves autoloadable method LazyValue callables through persistent cache',
         );
 
         expect($loaded->string('static'))->toBe('static:runtime')
+            ->and($loaded->string('inherited-static'))
+            ->toBe(LazyValueStaticCallable::class . ':runtime')
             ->and($loaded->string('object'))->toBe('object:runtime');
     } finally {
         @unlink($file);
