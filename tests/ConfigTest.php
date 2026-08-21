@@ -120,6 +120,24 @@ it('can disable LazyValue caching', function (): void {
         ->and($config->int('lazy'))->toBe(2);
 });
 
+it('fails fast on circular LazyValue resolution and clears the reentrancy guard', function (): void {
+    $reenter = true;
+    $lazy = null;
+    $lazy = new LazyValue(function (Config $config) use (&$lazy, &$reenter): string {
+        if ($reenter) {
+            $reenter = false;
+            return $lazy->resolve($config);
+        }
+
+        return 'resolved';
+    });
+    $config = new Config(['lazy' => $lazy]);
+
+    expect(fn() => $config->get('lazy'))
+        ->toThrow(ConfigException::class, 'Circular LazyValue resolution')
+        ->and($config->string('lazy'))->toBe('resolved');
+});
+
 it('filters literal nested and integer keys without mutating the original', function (): void {
     $config = new Config([
         0 => 'zero',

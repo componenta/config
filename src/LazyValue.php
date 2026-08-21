@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Componenta\Config;
 
 use Closure;
+use Componenta\Config\Exception\ConfigException;
 use WeakMap;
 
 /**
@@ -21,6 +22,9 @@ final class LazyValue
     /** @var WeakMap<object, array{mixed}>|null */
     private ?WeakMap $values = null;
 
+    /** @var WeakMap<object, true>|null */
+    private ?WeakMap $resolving = null;
+
     public function __construct(
         callable $callback,
         public readonly bool $cache = true,
@@ -30,19 +34,33 @@ final class LazyValue
 
     public function resolve(Config|ContainerValue $context): mixed
     {
-        if (!$this->cache) {
-            return ($this->callback)($context);
+        if ($this->cache) {
+            $this->values ??= new WeakMap();
+
+            if (isset($this->values[$context])) {
+                return $this->values[$context][0];
+            }
         }
 
-        $this->values ??= new WeakMap();
-
-        if (isset($this->values[$context])) {
-            return $this->values[$context][0];
+        $this->resolving ??= new WeakMap();
+        if (isset($this->resolving[$context])) {
+            throw new ConfigException(
+                'Circular LazyValue resolution detected for the same runtime context.',
+            );
         }
 
-        $value = ($this->callback)($context);
-        $this->values[$context] = [$value];
+        $this->resolving[$context] = true;
 
-        return $value;
+        try {
+            $value = ($this->callback)($context);
+
+            if ($this->cache) {
+                $this->values[$context] = [$value];
+            }
+
+            return $value;
+        } finally {
+            unset($this->resolving[$context]);
+        }
     }
 }
