@@ -87,6 +87,17 @@ final readonly class Environment implements \Countable, \IteratorAggregate, Arra
         return $default;
     }
 
+    public function match(
+        string|ConfigPath $key,
+        mixed $value,
+        mixed $default = DefaultValue::None,
+        bool $strict = false,
+    ): bool {
+        $environmentValue = $this->get($key, $default);
+
+        return $strict ? $environmentValue === $value : $environmentValue == $value;
+    }
+
     public function has(string|ConfigPath $key): bool
     {
         return array_key_exists($this->normalize($key), $this->data);
