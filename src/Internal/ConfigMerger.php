@@ -18,6 +18,8 @@ use InvalidArgumentException;
  */
 final class ConfigMerger
 {
+    private const int MAX_DEPTH = 64;
+
     /** @var array<string, true> */
     private const array ATOMIC_DEPENDENCY_MAPS = [
         ConfigKey::FACTORIES => true,
@@ -58,8 +60,14 @@ final class ConfigMerger
         return self::mergeArray($base, $override, root: true);
     }
 
-    private static function mergeArray(array $base, array $override, bool $root = false): array
-    {
+    private static function mergeArray(
+        array $base,
+        array $override,
+        bool $root = false,
+        int $depth = 0,
+    ): array {
+        self::assertDepth($depth);
+
         if ($base === []) {
             return $override;
         }
@@ -77,8 +85,8 @@ final class ConfigMerger
                 && is_array($value)
             ) {
                 $base[$key] = $root && $key === ConfigKey::DEPENDENCIES
-                    ? self::mergeDependencies($base[$key], $value)
-                    : self::mergeArray($base[$key], $value);
+                    ? self::mergeDependencies($base[$key], $value, $depth + 1)
+                    : self::mergeArray($base[$key], $value, depth: $depth + 1);
                 continue;
             }
 
@@ -88,8 +96,13 @@ final class ConfigMerger
         return $base;
     }
 
-    private static function mergeDependencies(array $base, array $override): array
-    {
+    private static function mergeDependencies(
+        array $base,
+        array $override,
+        int $depth,
+    ): array {
+        self::assertDepth($depth);
+
         if ($base === []) {
             return $override;
         }
@@ -123,7 +136,7 @@ final class ConfigMerger
                 continue;
             }
 
-            $base[$key] = self::mergeArray($base[$key], $value);
+            $base[$key] = self::mergeArray($base[$key], $value, depth: $depth + 1);
         }
 
         return $base;
@@ -143,17 +156,24 @@ final class ConfigMerger
         return $base;
     }
 
-    /**
-     * @param array<string, list<mixed>> $base
-     * @param array<string, list<mixed>> $override
-     * @return array<string, list<mixed>>
-     */
     private static function mergeDelegators(array $base, array $override): array
     {
         foreach ($override as $id => $pipeline) {
-            $base[$id] = array_key_exists($id, $base)
-                ? [...$base[$id], ...$pipeline]
-                : $pipeline;
+            if (!is_string($id) || !is_array($pipeline)) {
+                throw new \LogicException('Validated delegator structure invariant was lost.');
+            }
+
+            if (!array_key_exists($id, $base)) {
+                $base[$id] = $pipeline;
+                continue;
+            }
+
+            $existing = $base[$id];
+            if (!is_array($existing)) {
+                throw new \LogicException('Validated delegator pipeline invariant was lost.');
+            }
+
+            $base[$id] = [...$existing, ...$pipeline];
         }
 
         return $base;
@@ -240,6 +260,16 @@ final class ConfigMerger
                     $id,
                 ));
             }
+        }
+    }
+
+    private static function assertDepth(int $depth): void
+    {
+        if ($depth > self::MAX_DEPTH) {
+            throw new InvalidArgumentException(sprintf(
+                'Configuration merge exceeds maximum nesting depth of %d.',
+                self::MAX_DEPTH,
+            ));
         }
     }
 
