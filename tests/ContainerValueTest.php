@@ -7,6 +7,8 @@ use Componenta\Config\ContainerEntry;
 use Componenta\Config\Config;
 use Componenta\Config\ConfigEntry;
 use Componenta\Config\ConfigPath;
+use Componenta\Config\Environment;
+use Componenta\Config\EnvironmentEntry;
 use Componenta\Config\Exception\ConfigException;
 use Componenta\Config\Exception\InvalidContainerValueException;
 use Componenta\Config\LazyValue;
@@ -95,6 +97,14 @@ it('resolves a config entry fallback against the same config snapshot', function
 
     expect($container->find('app.name', new ConfigEntry(new ConfigPath('app.name'))))
         ->toBe('Componenta');
+});
+
+it('resolves an environment entry fallback against the same runtime environment snapshot', function (): void {
+    $config = new Config([], new Environment(['APP_NAME' => 'runtime']));
+    $container = containerValue(config: $config);
+
+    expect($container->find('app.name', new EnvironmentEntry('APP_NAME')))
+        ->toBe('runtime');
 });
 
 it('executes a lazy fallback when an optional entry is missing', function (): void {

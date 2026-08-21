@@ -60,6 +60,10 @@ final readonly class ContainerValue implements ContainerInterface
             return $default->resolve($this->config);
         }
 
+        if ($default instanceof EnvironmentEntry) {
+            return $default->resolve($this->config->environment);
+        }
+
         if ($default instanceof LazyValue) {
             return $default->resolve($this);
         }
