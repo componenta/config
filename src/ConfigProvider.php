@@ -26,10 +26,10 @@ class ConfigProvider
             ));
         }
 
-        $config = config_merge([], [
-            ConfigKey::DEPENDENCIES => $this->getDependencies(),
-            ...$application,
-        ]);
+        $config = config_merge(
+            [ConfigKey::DEPENDENCIES => $this->getDependencies()],
+            $application,
+        );
 
         foreach ($this->getProviders() as $provider) {
             if (!is_callable($provider)) {
@@ -66,7 +66,7 @@ class ConfigProvider
         return [];
     }
 
-    /** @return array<string, mixed> */
+    /** @return array<array-key, mixed> */
     protected function getConfig(): array
     {
         return [];

@@ -51,6 +51,22 @@ it('transports the DI v5 dependency schema without reimplementing DI normalizati
         ->and($dependencies[ConfigKey::SERVICES]['ready'])->toBeInstanceOf(stdClass::class);
 });
 
+it('preserves numeric application config keys produced by the provider', function (): void {
+    $provider = new class extends ConfigProvider {
+        protected function getConfig(): array
+        {
+            return [404 => 'not-found', 500 => 'server-error'];
+        }
+    };
+
+    $config = $provider();
+
+    expect($config[404])->toBe('not-found')
+        ->and($config[500])->toBe('server-error')
+        ->and($config)->not->toHaveKey(0)
+        ->and($config)->not->toHaveKey(1);
+});
+
 it('rejects direct callable-pair delegators even without child providers', function (): void {
     $provider = new class extends ConfigProvider {
         protected function getDelegators(): array
