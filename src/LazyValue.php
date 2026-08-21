@@ -35,32 +35,33 @@ final class LazyValue
     public function resolve(Config|ContainerValue $context): mixed
     {
         if ($this->cache) {
-            $this->values ??= new WeakMap();
+            $values = $this->values ??= new WeakMap();
 
-            if (isset($this->values[$context])) {
-                return $this->values[$context][0];
+            if (isset($values[$context])) {
+                return $values[$context][0];
             }
         }
 
-        $this->resolving ??= new WeakMap();
-        if (isset($this->resolving[$context])) {
+        $resolving = $this->resolving ??= new WeakMap();
+        if (isset($resolving[$context])) {
             throw new ConfigException(
                 'Circular LazyValue resolution detected for the same runtime context.',
             );
         }
 
-        $this->resolving[$context] = true;
+        $resolving[$context] = true;
 
         try {
             $value = ($this->callback)($context);
 
             if ($this->cache) {
-                $this->values[$context] = [$value];
+                $values = $this->values ??= new WeakMap();
+                $values[$context] = [$value];
             }
 
             return $value;
         } finally {
-            unset($this->resolving[$context]);
+            unset($resolving[$context]);
         }
     }
 }
