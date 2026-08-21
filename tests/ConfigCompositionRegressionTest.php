@@ -205,6 +205,19 @@ it('uses recursive map merge semantics outside the dependency root', function ()
     ]);
 });
 
+it('rejects configuration graphs deeper than the supported merge depth', function (): void {
+    $base = ['value' => 'base'];
+    $override = ['value' => 'override'];
+
+    for ($i = 0; $i < 66; ++$i) {
+        $base = ['nested' => $base];
+        $override = ['nested' => $override];
+    }
+
+    expect(fn() => config_merge($base, $override))
+        ->toThrow(InvalidArgumentException::class, 'maximum nesting depth');
+});
+
 it('lets later scalar replacement flags win', function (): void {
     $merged = config_merge(
         [ConfigKey::DEPENDENCIES => [
