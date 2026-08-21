@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Componenta\Config;
 
+use Closure;
 use Componenta\Config\Exception\ConfigException;
 use Componenta\Config\Internal\ConfigCacheObjectExporter;
 use Componenta\VarExport\Config\ClosureUseMode;
 use Componenta\VarExport\Config\ExportConfig;
 use Componenta\VarExport\VarExporter;
+use ReflectionFunction;
 use Throwable;
 
 /**
@@ -18,7 +20,7 @@ use Throwable;
  */
 final class ConfigLoader
 {
-    public const int CACHE_VERSION = 3;
+    public const int CACHE_VERSION = 4;
 
     /** @var array<string, true> */
     private const array CACHE_KEYS = [
@@ -111,6 +113,8 @@ final class ConfigLoader
         $temporary = null;
 
         try {
+            self::assertPortablePlainClosures($data);
+
             $directory = dirname($filename);
 
             if (!is_dir($directory)
@@ -190,6 +194,30 @@ final class ConfigLoader
                 'Failed to export configuration: ' . $e->getMessage(),
                 previous: $e,
             );
+        }
+    }
+
+    private static function assertPortablePlainClosures(mixed $value): void
+    {
+        if ($value instanceof Closure) {
+            $reflection = new ReflectionFunction($value);
+            if ($reflection->getClosureScopeClass() !== null
+                || $reflection->getClosureThis() !== null
+            ) {
+                throw new \RuntimeException(
+                    'Cannot persist class-scoped plain Closure configuration values without changing their runtime binding. Use a global-scope closure, a portable callable representation, or LazyValue for explicitly supported lazy callbacks.',
+                );
+            }
+
+            return;
+        }
+
+        if (!is_array($value)) {
+            return;
+        }
+
+        foreach ($value as $item) {
+            self::assertPortablePlainClosures($item);
         }
     }
 
