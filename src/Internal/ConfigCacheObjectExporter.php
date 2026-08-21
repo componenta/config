@@ -11,7 +11,10 @@ use Componenta\VarExport\Config\ExportConfig;
 use Componenta\VarExport\Contract\ClosureExporterInterface;
 use Componenta\VarExport\Contract\ObjectExporterInterface;
 use Componenta\VarExport\ObjectExporter;
+use ReflectionFunction;
+use ReflectionMethod;
 use ReflectionProperty;
+use RuntimeException;
 
 /** @internal Persistent-config object exporter for config-specific wrappers. */
 final readonly class ConfigCacheObjectExporter implements ObjectExporterInterface
@@ -39,10 +42,7 @@ final readonly class ConfigCacheObjectExporter implements ObjectExporterInterfac
             return $this->fallback->exportWithDepth($object, $depth);
         }
 
-        $callback = $this->closureExporter->exportWithDepth(
-            self::callback($object),
-            $depth + 1,
-        );
+        $callback = $this->exportCallback(self::callback($object), $depth + 1);
         $cache = $object->cache ? 'true' : 'false';
 
         return sprintf(
@@ -64,6 +64,71 @@ final readonly class ConfigCacheObjectExporter implements ObjectExporterInterfac
             $config,
             $this->closureExporter->withConfig($config),
             $this->fallback->withConfig($config),
+        );
+    }
+
+    private function exportCallback(Closure $callback, int $depth): string
+    {
+        $reflection = new ReflectionFunction($callback);
+
+        if ($reflection->getName() === '{closure}') {
+            return $this->closureExporter->exportWithDepth($callback, $depth);
+        }
+
+        $boundObject = $reflection->getClosureThis();
+        if ($boundObject !== null) {
+            $method = new ReflectionMethod($boundObject, $reflection->getName());
+            if (!$method->isPublic()) {
+                throw new RuntimeException(sprintf(
+                    'Cannot persist LazyValue callback %s::%s(): method is not public.',
+                    $boundObject::class,
+                    $method->getName(),
+                ));
+            }
+            if (!$this->fallback->supports($boundObject)) {
+                throw new RuntimeException(sprintf(
+                    'Cannot persist LazyValue callback target of type %s.',
+                    $boundObject::class,
+                ));
+            }
+
+            $target = $this->fallback->exportWithDepth($boundObject, $depth + 1);
+
+            return sprintf(
+                '\\Closure::fromCallable([%s, %s])',
+                $target,
+                var_export($method->getName(), true),
+            );
+        }
+
+        $scope = $reflection->getClosureScopeClass();
+        if ($scope !== null) {
+            $method = new ReflectionMethod($scope->getName(), $reflection->getName());
+            if (!$method->isPublic() || !$method->isStatic()) {
+                throw new RuntimeException(sprintf(
+                    'Cannot persist LazyValue callback %s::%s(): method must be public static.',
+                    $scope->getName(),
+                    $method->getName(),
+                ));
+            }
+
+            return sprintf(
+                'static fn($context) => \\%s::%s($context)',
+                ltrim($scope->getName(), '\\'),
+                $method->getName(),
+            );
+        }
+
+        if (!$reflection->isInternal()) {
+            throw new RuntimeException(sprintf(
+                'Cannot persist user-defined named function LazyValue callback "%s": use self-contained anonymous closure logic or an autoloadable public method.',
+                $reflection->getName(),
+            ));
+        }
+
+        return sprintf(
+            'static fn($context) => \\%s($context)',
+            ltrim($reflection->getName(), '\\'),
         );
     }
 
