@@ -72,7 +72,7 @@ final readonly class ConfigCacheObjectExporter implements ObjectExporterInterfac
         $reflection = new ReflectionFunction($callback);
 
         if ($reflection->getName() === '{closure}') {
-            return $this->closureExporter->exportWithDepth($callback, $depth);
+            return $this->exportAnonymousClosure($callback, $reflection, $depth);
         }
 
         $boundObject = $reflection->getClosureThis();
@@ -130,6 +130,40 @@ final readonly class ConfigCacheObjectExporter implements ObjectExporterInterfac
         return sprintf(
             'static fn($context) => \\%s($context)',
             ltrim($reflection->getName(), '\\'),
+        );
+    }
+
+    private function exportAnonymousClosure(
+        Closure $callback,
+        ReflectionFunction $reflection,
+        int $depth,
+    ): string {
+        $exported = $this->closureExporter->exportWithDepth($callback, $depth);
+        $scope = $reflection->getClosureScopeClass();
+
+        if ($scope === null) {
+            return $exported;
+        }
+
+        if ($scope->isAnonymous()) {
+            throw new RuntimeException(
+                'Cannot persist class-scoped LazyValue closure from an anonymous class.',
+            );
+        }
+
+        $calledClass = $reflection->getClosureCalledClass() ?? $scope;
+        if ($calledClass->getName() !== $scope->getName()) {
+            throw new RuntimeException(sprintf(
+                'Cannot persist class-scoped LazyValue closure with different lexical and called classes (%s vs %s).',
+                $scope->getName(),
+                $calledClass->getName(),
+            ));
+        }
+
+        return sprintf(
+            '\\Closure::bind(%s, null, \\%s::class)',
+            $exported,
+            ltrim($scope->getName(), '\\'),
         );
     }
 

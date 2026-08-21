@@ -37,6 +37,36 @@ final readonly class LazyValueObjectCallable
     }
 }
 
+final class LazyValueScopedClosure
+{
+    private const string PREFIX = 'scoped';
+
+    public static function make(): LazyValue
+    {
+        return new LazyValue(
+            static fn(Config $config): string => self::PREFIX
+                . ':' . static::class
+                . ':' . $config->environment->string('LAZY_VALUE_ENV'),
+        );
+    }
+}
+
+class LazyValueScopedClosureBase
+{
+    private const string PREFIX = 'base';
+
+    public static function make(): LazyValue
+    {
+        return new LazyValue(
+            static fn(Config $config): string => self::PREFIX
+                . ':' . static::class
+                . ':' . $config->environment->string('LAZY_VALUE_ENV'),
+        );
+    }
+}
+
+final class LazyValueScopedClosureChild extends LazyValueScopedClosureBase {}
+
 it('preserves autoloadable method LazyValue callables through persistent cache', function (): void {
     $file = sys_get_temp_dir() . '/componenta_lazy_value_callable_' . bin2hex(random_bytes(6)) . '.php';
 
@@ -58,6 +88,43 @@ it('preserves autoloadable method LazyValue callables through persistent cache',
             ->and($loaded->string('inherited-static'))
             ->toBe(LazyValueStaticCallable::class . ':runtime')
             ->and($loaded->string('object'))->toBe('object:runtime');
+    } finally {
+        @unlink($file);
+    }
+});
+
+it('preserves same-class lexical scope for anonymous LazyValue closures', function (): void {
+    $file = sys_get_temp_dir() . '/componenta_lazy_value_scope_' . bin2hex(random_bytes(6)) . '.php';
+
+    try {
+        $config = new Config([
+            'scoped' => LazyValueScopedClosure::make(),
+        ], new Environment(['LAZY_VALUE_ENV' => 'build']));
+
+        ConfigLoader::export($config, $file);
+        $loaded = ConfigLoader::loadFromFile(
+            $file,
+            new Environment(['LAZY_VALUE_ENV' => 'runtime']),
+        );
+
+        expect($loaded->string('scoped'))
+            ->toBe('scoped:' . LazyValueScopedClosure::class . ':runtime');
+    } finally {
+        @unlink($file);
+    }
+});
+
+it('rejects anonymous LazyValue closures whose lexical and called classes differ', function (): void {
+    $file = sys_get_temp_dir() . '/componenta_lazy_value_inherited_scope_' . bin2hex(random_bytes(6)) . '.php';
+
+    try {
+        $config = new Config([
+            'scoped' => LazyValueScopedClosureChild::make(),
+        ], new Environment(['LAZY_VALUE_ENV' => 'build']));
+
+        expect(fn() => ConfigLoader::export($config, $file))
+            ->toThrow(ConfigException::class, 'different lexical and called classes');
+        expect(is_file($file))->toBeFalse();
     } finally {
         @unlink($file);
     }
