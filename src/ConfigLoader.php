@@ -197,8 +197,15 @@ final class ConfigLoader
         }
     }
 
-    private static function assertPortablePlainClosures(mixed $value): void
+    private static function assertPortablePlainClosures(mixed $value, int $depth = 0): void
     {
+        if ($depth > ExportConfig::DEFAULT_MAX_DEPTH) {
+            throw new \RuntimeException(sprintf(
+                'Configuration cache traversal exceeds maximum nesting depth of %d.',
+                ExportConfig::DEFAULT_MAX_DEPTH,
+            ));
+        }
+
         if ($value instanceof Closure) {
             $reflection = new ReflectionFunction($value);
             if ($reflection->getClosureScopeClass() !== null
@@ -217,7 +224,7 @@ final class ConfigLoader
         }
 
         foreach ($value as $item) {
-            self::assertPortablePlainClosures($item);
+            self::assertPortablePlainClosures($item, $depth + 1);
         }
     }
 
