@@ -136,6 +136,9 @@ it('rejects unsupported and structurally invalid DI v5 sections before merge', f
             ConfigKey::DEPENDENCIES => [ConfigKey::PARAMETER_RESOLVERS_REPLACE => 1],
         ]))->toThrow(InvalidArgumentException::class, 'must be bool')
         ->and(fn() => config_merge([], [
+            ConfigKey::DEPENDENCIES => [ConfigKey::ATTRIBUTE_DEFINITIONS => ['named' => 'Definition']],
+        ]))->toThrow(InvalidArgumentException::class, 'must be a list')
+        ->and(fn() => config_merge([], [
             ConfigKey::DEPENDENCIES => [0 => []],
         ]))->toThrow(InvalidArgumentException::class, 'Unsupported DI v5 dependency section');
 });
@@ -147,7 +150,7 @@ it('rejects a non-array dependency root before it can replace valid dependencies
     ))->toThrow(InvalidArgumentException::class, 'Dependency root');
 });
 
-it('preserves keyed invokables until DI v5 canonicalization', function (): void {
+it('preserves keyed invokables while appending numeric invokables', function (): void {
     $merged = config_merge(
         [ConfigKey::DEPENDENCIES => [
             ConfigKey::INVOKABLES => ['service' => 'ServiceA', 'First'],
@@ -164,15 +167,41 @@ it('preserves keyed invokables until DI v5 canonicalization', function (): void 
     ]);
 });
 
-it('uses normal recursive merge semantics outside the dependency root', function (): void {
+it('appends real application lists and preserves integer keys in application maps', function (): void {
     expect(config_merge(
-        ['feature' => ['items' => ['a'], 'settings' => ['a' => 1]]],
-        ['feature' => ['items' => ['b'], 'settings' => ['b' => 2]]],
-    ))->toBe([
-        'feature' => [
-            'items' => ['a', 'b'],
-            'settings' => ['a' => 1, 'b' => 2],
+        [
+            'middleware' => ['auth'],
+            'errors' => [404 => 'not-found', 401 => 'unauthorized'],
         ],
+        [
+            'middleware' => ['csrf'],
+            'errors' => [500 => 'server-error', 404 => 'custom-not-found'],
+        ],
+    ))->toBe([
+        'middleware' => ['auth', 'csrf'],
+        'errors' => [
+            404 => 'custom-not-found',
+            401 => 'unauthorized',
+            500 => 'server-error',
+        ],
+    ]);
+});
+
+it('treats mixed-key application arrays as maps rather than reindexing numeric keys', function (): void {
+    expect(config_merge(
+        ['mixed' => [0 => 'base', 'name' => 'first']],
+        ['mixed' => [0 => 'override', 'name' => 'second']],
+    ))->toBe([
+        'mixed' => [0 => 'override', 'name' => 'second'],
+    ]);
+});
+
+it('uses recursive map merge semantics outside the dependency root', function (): void {
+    expect(config_merge(
+        ['feature' => ['settings' => ['a' => 1]]],
+        ['feature' => ['settings' => ['b' => 2]]],
+    ))->toBe([
+        'feature' => ['settings' => ['a' => 1, 'b' => 2]],
     ]);
 });
 

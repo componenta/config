@@ -10,9 +10,9 @@ use InvalidArgumentException;
 /**
  * Deterministic configuration composition.
  *
- * Generic arrays merge recursively by string key and append numeric entries.
- * The DI v5 dependency root additionally preserves semantic map keys and
- * rejects shapes that cannot be composed without changing their meaning.
+ * Generic lists append while maps preserve both string and integer key identity.
+ * The DI v5 dependency root uses section-specific merge rules so composition
+ * cannot change the meaning of a valid dependency shape.
  *
  * @internal
  */
@@ -44,6 +44,12 @@ final class ConfigMerger
         ConfigKey::ATTRIBUTE_DEFINITIONS_REPLACE => true,
     ];
 
+    /** @var array<string, true> */
+    private const array LIST_DEPENDENCY_SECTIONS = [
+        ConfigKey::ATTRIBUTE_DEFINITIONS => true,
+        ConfigKey::ATTRIBUTE_CAPABILITIES => true,
+    ];
+
     public static function merge(array $base, array $override): array
     {
         self::assertMergeableDependencies($base);
@@ -57,24 +63,26 @@ final class ConfigMerger
         if ($base === []) {
             return $override;
         }
+        if ($override === []) {
+            return $base;
+        }
+
+        if (array_is_list($base) && array_is_list($override)) {
+            return [...$base, ...$override];
+        }
 
         foreach ($override as $key => $value) {
-            if (is_int($key)) {
-                $base[] = $value;
-                continue;
-            }
-
-            if (!is_array($value)
-                || !array_key_exists($key, $base)
-                || !is_array($base[$key])
+            if (array_key_exists($key, $base)
+                && is_array($base[$key])
+                && is_array($value)
             ) {
-                $base[$key] = $value;
+                $base[$key] = $root && $key === ConfigKey::DEPENDENCIES
+                    ? self::mergeDependencies($base[$key], $value)
+                    : self::mergeArray($base[$key], $value);
                 continue;
             }
 
-            $base[$key] = $root && $key === ConfigKey::DEPENDENCIES
-                ? self::mergeDependencies($base[$key], $value)
-                : self::mergeArray($base[$key], $value);
+            $base[$key] = $value;
         }
 
         return $base;
@@ -87,14 +95,9 @@ final class ConfigMerger
         }
 
         foreach ($override as $key => $value) {
-            if (is_int($key)) {
-                $base[] = $value;
-                continue;
-            }
-
-            if (!is_array($value)
-                || !array_key_exists($key, $base)
+            if (!array_key_exists($key, $base)
                 || !is_array($base[$key])
+                || !is_array($value)
             ) {
                 $base[$key] = $value;
                 continue;
@@ -105,7 +108,52 @@ final class ConfigMerger
                 continue;
             }
 
+            if ($key === ConfigKey::INVOKABLES) {
+                $base[$key] = self::mergeInvokables($base[$key], $value);
+                continue;
+            }
+
+            if ($key === ConfigKey::DELEGATORS) {
+                $base[$key] = self::mergeDelegators($base[$key], $value);
+                continue;
+            }
+
+            if (isset(self::LIST_DEPENDENCY_SECTIONS[$key])) {
+                $base[$key] = [...$base[$key], ...$value];
+                continue;
+            }
+
             $base[$key] = self::mergeArray($base[$key], $value);
+        }
+
+        return $base;
+    }
+
+    private static function mergeInvokables(array $base, array $override): array
+    {
+        foreach ($override as $key => $value) {
+            if (is_int($key)) {
+                $base[] = $value;
+                continue;
+            }
+
+            $base[$key] = $value;
+        }
+
+        return $base;
+    }
+
+    /**
+     * @param array<string, list<mixed>> $base
+     * @param array<string, list<mixed>> $override
+     * @return array<string, list<mixed>>
+     */
+    private static function mergeDelegators(array $base, array $override): array
+    {
+        foreach ($override as $id => $pipeline) {
+            $base[$id] = array_key_exists($id, $base)
+                ? [...$base[$id], ...$pipeline]
+                : $pipeline;
         }
 
         return $base;
@@ -150,6 +198,17 @@ final class ConfigMerger
                     'Dependency section "%s" must be bool; got %s.',
                     $key,
                     get_debug_type($value),
+                ));
+            }
+
+            if (isset(self::LIST_DEPENDENCY_SECTIONS[$key])
+                && is_array($value)
+                && $value !== []
+                && !array_is_list($value)
+            ) {
+                throw new InvalidArgumentException(sprintf(
+                    'Dependency section "%s" must be a list.',
+                    $key,
                 ));
             }
         }
