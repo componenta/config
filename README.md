@@ -134,7 +134,7 @@ Existing deployment values remain authoritative unless `override: true` is reque
 
 ## Provider composition for DI v5
 
-`ConfigProvider` transports the dependency schema consumed by DI v5. DI owns semantic validation/canonicalization of factories, aliases, invokables, delegators and extension specifications.
+`ConfigProvider` transports the exact dependency sections consumed by DI v5. Config validates only structural invariants required for deterministic composition: known section names, array/bool section shapes and composable delegator pipelines. DI v5 remains responsible for semantic validation and canonicalization of the values inside those sections.
 
 Available hooks:
 
@@ -163,7 +163,7 @@ At the root `dependencies` section:
 - delegator pipelines append;
 - replacement flags are scalar and the later explicit value wins.
 
-Outside `dependencies`, normal recursive configuration merge applies: string keys recurse/replace and numeric keys append. Malformed non-array dependency roots and malformed delegator pipelines fail before merge can change their shape.
+Outside `dependencies`, normal recursive configuration merge applies: string keys recurse/replace and numeric keys append. Unknown DI sections and malformed dependency roots, array/bool sections or delegator pipelines fail before merge can change their meaning.
 
 A class-method callable pair must be nested as one delegator pipeline item:
 
@@ -224,11 +224,11 @@ $config = ConfigLoader::loadFromFile(
 
 DI v5 loads its own dependency cache and reattaches normalized dependencies when it builds the final runtime `Config`. Provider mode and cache mode therefore converge on the same runtime shape without serializing build-time environment or duplicating the DI graph.
 
-Unknown envelope keys, embedded dependency roots and stale cache versions fail fast. Cache files are written via a temporary file, flushed, syntax-checked and atomically activated. On POSIX systems the activated cache file is owner-readable/writable only (`0600`).
+Unknown envelope keys, embedded dependency roots and stale cache versions fail fast. Cache files are written via a temporary file, flushed, syntax-checked and atomically activated. File ownership and permissions are deployment concerns and follow the process/filesystem policy (including umask); configure them so the runtime user can read the cache while keeping sensitive literal configuration appropriately protected.
 
 ## Container helpers
 
-`ContainerValue` wraps a PSR-11 container and carries the same `Config` snapshot. When `Config` is not passed explicitly, the wrapped DI v5 container must expose `Config::class`; a missing bootstrap config fails fast.
+`ContainerValue` wraps a PSR-11 container and carries the same `Config` snapshot. Its fallbacks understand `ContainerEntry`, `ConfigEntry`, `EnvironmentEntry` and `LazyValue`. When `Config` is not passed explicitly, the wrapped DI v5 container must expose `Config::class`; a missing bootstrap config fails fast.
 
 ## Requirements
 
