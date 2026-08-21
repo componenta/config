@@ -7,10 +7,12 @@ namespace Componenta\Config;
 /**
  * Dependency configuration keys shared by Componenta configuration providers.
  *
+ * Package-specific ConfigKey classes may extend this class and add their own
+ * configuration keys while inheriting the shared DI schema.
  * Consumer packages remain responsible for validating the values stored under
  * these keys. This package only provides stable names and merge semantics.
  */
-final class ConfigKey
+class ConfigKey
 {
     public const string DEPENDENCIES = 'dependencies';
     public const string FACTORIES = 'factories';
@@ -41,5 +43,5 @@ final class ConfigKey
         ];
     }
 
-    private function __construct() {}
+    protected function __construct() {}
 }
