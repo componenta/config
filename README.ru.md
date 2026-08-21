@@ -54,9 +54,11 @@ process environment < $_SERVER < $_ENV
 
 ## ConfigEntry и LazyValue
 
-`ConfigEntry` используется для fallback на другой config key. `LazyValue` — для явного lazy evaluation. Lazy result кэшируется отдельно для каждого `Config`/`ContainerValue`, если не указан `cache: false`.
+`ConfigEntry` используется для fallback на другой config key. `LazyValue` — для явного lazy evaluation. Lazy result кэшируется отдельно для каждого `Config`/`ContainerValue`, если не указан `cache: false`. Циклическое разрешение в одном runtime context завершается fail-fast.
 
-Persistent cache поддерживает anonymous source-backed closures с exportable captured values, public static methods и методы exportable readonly objects. User-defined named function отклоняется во время cache export: его definition может находиться в provider-файле, который production bootstrap уже не загружает.
+Persistent cache поддерживает anonymous source-backed closures с exportable captured values, public static methods и методы exportable readonly objects. Class scope anonymous `LazyValue` closure сохраняется только там, где его можно восстановить без изменения `self`/`static` semantics. User-defined named function отклоняется во время cache export: его definition может находиться в provider-файле, который production bootstrap уже не загружает.
+
+Обычный `Closure` как значение конфигурации cache-able только если он global-scope, unbound и в остальном экспортируем. Class-scoped/bound plain Closure отклоняется, а не сохраняется с изменённой runtime binding semantics.
 
 ## Dotenv
 
@@ -95,7 +97,7 @@ getAttributeCapabilities()
 - delegator pipelines append-ятся;
 - поздний explicit replacement flag побеждает.
 
-За пределами dependency root применяется normal recursive config merge. Unknown DI sections и malformed dependency root, array/bool sections или delegator pipelines отклоняются до merge, чтобы их смысл не мог измениться при композиции. Class-method callable pair должна быть вложенным pipeline item.
+За пределами dependency root append-ятся только две настоящие PHP lists. Остальные arrays являются maps: identity string/integer keys сохраняется, nested arrays с одинаковым key объединяются рекурсивно, более поздний scalar заменяет предыдущий. Unknown DI sections и malformed dependency root, array/bool sections или delegator pipelines отклоняются до merge. Чрезмерно глубокие recursive graphs завершаются fail-fast вместо stack exhaustion. Class-method callable pair должна быть вложенным pipeline item.
 
 ## File providers
 
@@ -118,7 +120,7 @@ $config = ConfigLoader::loadFromFile(
 
 DI v5 загружает собственный dependency cache и при build снова добавляет normalized dependencies в итоговый runtime `Config`. Provider/cache modes сходятся к одной runtime shape без build-time environment и без дублирования DI graph.
 
-Unknown envelope keys, embedded dependency root и stale cache version отклоняются. Cache-файл создаётся через temporary file, flush, syntax check и atomic rename. Ownership и permissions — политика deployment-а и следуют настройкам filesystem/umask процесса; их нужно настроить так, чтобы runtime user мог читать cache, а literal sensitive configuration была защищена.
+Unknown envelope keys, embedded dependency root, stale cache version и graphs глубже поддерживаемого exporter limit отклоняются. Cache-файл создаётся через temporary file, flush, syntax check и atomic rename. Ownership и permissions — политика deployment-а и следуют настройкам filesystem/umask процесса; их нужно настроить так, чтобы runtime user мог читать cache, а literal sensitive configuration была защищена.
 
 ## Container helpers
 
