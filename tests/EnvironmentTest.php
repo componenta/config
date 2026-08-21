@@ -32,6 +32,22 @@ it('supports defaults and required lookup', function (): void {
         ->toThrow(ConfigException::class);
 });
 
+it('matches environment values with optional strict comparison', function (): void {
+    $environment = new Environment([
+        'APP_ENV' => 'production',
+        'FEATURE_FLAG' => '1',
+        'DATABASE_HOST' => 'localhost',
+    ]);
+
+    expect($environment->match('APP_ENV', 'production'))->toBeTrue()
+        ->and($environment->match('FEATURE_FLAG', true))->toBeTrue()
+        ->and($environment->match('FEATURE_FLAG', true, strict: true))->toBeFalse()
+        ->and($environment->match(new ConfigPath('database.host'), 'localhost'))->toBeTrue()
+        ->and($environment->match('MISSING', 'fallback', default: 'fallback'))->toBeTrue()
+        ->and(fn() => $environment->match('MISSING', 'value'))
+        ->toThrow(ConfigException::class);
+});
+
 it('provides typed accessors and rejects ambiguous booleans', function (): void {
     $environment = new Environment([
         'PORT' => '3306',
