@@ -25,18 +25,21 @@ final class LazyValue
     /** @var WeakMap<object, true>|null */
     private ?WeakMap $resolving = null;
 
-    public function __construct(
-        callable $callback,
-        public readonly bool $cache = true,
-    ) {
+    public function __construct(callable $callback, public readonly bool $cache = true)
+    {
         $this->callback = Closure::fromCallable($callback);
+    }
+
+    /** @internal Used by the persistent config exporter. */
+    public function callback(): Closure
+    {
+        return $this->callback;
     }
 
     public function resolve(Config|ContainerValue $context): mixed
     {
         if ($this->cache) {
             $values = $this->values ??= new WeakMap();
-
             if (isset($values[$context])) {
                 return $values[$context][0];
             }
@@ -44,21 +47,16 @@ final class LazyValue
 
         $resolving = $this->resolving ??= new WeakMap();
         if (isset($resolving[$context])) {
-            throw new ConfigException(
-                'Circular LazyValue resolution detected for the same runtime context.',
-            );
+            throw new ConfigException('Circular LazyValue resolution detected for the same runtime context.');
         }
 
         $resolving[$context] = true;
-
         try {
             $value = ($this->callback)($context);
-
             if ($this->cache) {
                 $values = $this->values ??= new WeakMap();
                 $values[$context] = [$value];
             }
-
             return $value;
         } finally {
             unset($resolving[$context]);
