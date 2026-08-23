@@ -10,42 +10,23 @@ use Componenta\Config\Exception\ConfigException;
 final class PlainScopedConfigClosureFixture
 {
     private const string VALUE = 'scoped';
-
-    public static function callback(): Closure
-    {
-        return static fn(): string => self::VALUE;
-    }
+    public static function callback(): Closure { return static fn(): string => self::VALUE; }
 }
 
-it('rejects class-scoped plain closures before writing a semantically different cache', function (): void {
+it('round-trips class-scoped plain closures when var-export can reproduce their lexical scope', function (): void {
     $file = sys_get_temp_dir() . '/componenta_plain_scoped_closure_' . bin2hex(random_bytes(6)) . '.php';
-
     try {
-        $config = new Config([
-            'callback' => PlainScopedConfigClosureFixture::callback(),
-        ], new Environment([]));
-
-        expect(fn() => ConfigLoader::export($config, $file))
-            ->toThrow(ConfigException::class, 'class-scoped plain Closure');
-        expect(is_file($file))->toBeFalse();
-    } finally {
-        @unlink($file);
-    }
+        $config = new Config(['callback' => PlainScopedConfigClosureFixture::callback()], new Environment([]));
+        ConfigLoader::export($config, $file);
+        $loaded = ConfigLoader::loadFromFile($file, new Environment([]));
+        $callback = $loaded->get('callback');
+        expect($callback)->toBeInstanceOf(Closure::class)->and($callback())->toBe('scoped');
+    } finally { @unlink($file); }
 });
 
 it('rejects cache graphs deeper than the exporter traversal limit', function (): void {
-    $file = sys_get_temp_dir() . '/componenta_deep_config_' . bin2hex(random_bytes(6)) . '.php';
-    $data = ['value' => true];
-
-    for ($i = 0; $i < 66; ++$i) {
-        $data = ['nested' => $data];
-    }
-
-    try {
-        expect(fn() => ConfigLoader::export(new Config($data, new Environment([])), $file))
-            ->toThrow(ConfigException::class, 'maximum nesting depth');
-        expect(is_file($file))->toBeFalse();
-    } finally {
-        @unlink($file);
-    }
+    $file = sys_get_temp_dir() . '/componenta_deep_config_' . bin2hex(random_bytes(6)) . '.php'; $data = ['value' => true];
+    for ($i = 0; $i < 66; ++$i) { $data = ['nested' => $data]; }
+    try { expect(fn() => ConfigLoader::export(new Config($data, new Environment([])), $file))->toThrow(ConfigException::class, 'Maximum nesting depth'); expect(is_file($file))->toBeFalse(); }
+    finally { @unlink($file); }
 });
