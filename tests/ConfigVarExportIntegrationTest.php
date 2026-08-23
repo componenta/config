@@ -58,3 +58,13 @@ it('reports the nested config value path when a special default is not portable'
         expect(is_file($file))->toBeFalse();
     } finally { @unlink($file); }
 });
+
+it('rejects shared LazyValue identity instead of splitting its runtime cache state', function (): void {
+    $file = sys_get_temp_dir() . '/componenta_shared_lazy_' . bin2hex(random_bytes(6)) . '.php';
+    $shared = lazy(static fn(Config $config): string => $config->string('value'));
+    try {
+        $config = new Config(['value' => 'same', 'first' => $shared, 'second' => $shared], new Environment([]));
+        expect(fn() => ConfigLoader::export($config, $file))->toThrow(ConfigException::class, 'shared object identity');
+        expect(is_file($file))->toBeFalse();
+    } finally { @unlink($file); }
+});
