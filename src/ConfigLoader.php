@@ -211,7 +211,16 @@ final class ConfigLoader
         mixed $value,
         SplObjectStorage $seen,
         array $path = [],
+        int $depth = 0,
     ): void {
+        if ($depth > ExportConfig::DEFAULT_MAX_DEPTH) {
+            throw new \RuntimeException(sprintf(
+                'Maximum nesting depth of %d exceeded during configuration cache preflight at %s.',
+                ExportConfig::DEFAULT_MAX_DEPTH,
+                self::formatPath($path),
+            ));
+        }
+
         if (is_array($value)) {
             foreach ($value as $key => $item) {
                 if (\ReflectionReference::fromArrayElement($value, $key) !== null) {
@@ -221,7 +230,7 @@ final class ConfigLoader
                     ));
                 }
 
-                self::assertNoSharedObjectIdentity($item, $seen, [...$path, $key]);
+                self::assertNoSharedObjectIdentity($item, $seen, [...$path, $key], $depth + 1);
             }
 
             return;
@@ -244,21 +253,21 @@ final class ConfigLoader
         $seen[$value] = $location;
 
         if ($value instanceof ConfigEntry) {
-            self::assertNoSharedObjectIdentity($value->key, $seen, [...$path, 'key']);
-            self::assertNoSharedObjectIdentity($value->default, $seen, [...$path, 'default']);
+            self::assertNoSharedObjectIdentity($value->key, $seen, [...$path, 'key'], $depth + 1);
+            self::assertNoSharedObjectIdentity($value->default, $seen, [...$path, 'default'], $depth + 1);
 
             return;
         }
 
         if ($value instanceof EnvironmentEntry) {
-            self::assertNoSharedObjectIdentity($value->key, $seen, [...$path, 'key']);
-            self::assertNoSharedObjectIdentity($value->default, $seen, [...$path, 'default']);
+            self::assertNoSharedObjectIdentity($value->key, $seen, [...$path, 'key'], $depth + 1);
+            self::assertNoSharedObjectIdentity($value->default, $seen, [...$path, 'default'], $depth + 1);
 
             return;
         }
 
         if ($value instanceof LazyValue) {
-            self::assertNoSharedObjectIdentity($value->callback(), $seen, [...$path, 'callback']);
+            self::assertNoSharedObjectIdentity($value->callback(), $seen, [...$path, 'callback'], $depth + 1);
 
             return;
         }
