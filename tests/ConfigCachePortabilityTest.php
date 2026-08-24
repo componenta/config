@@ -24,9 +24,9 @@ it('round-trips class-scoped plain closures when var-export can reproduce their 
     } finally { @unlink($file); }
 });
 
-it('rejects cache graphs deeper than the exporter traversal limit', function (): void {
+it('rejects cache graphs in the identity preflight before unbounded traversal', function (): void {
     $file = sys_get_temp_dir() . '/componenta_deep_config_' . bin2hex(random_bytes(6)) . '.php'; $data = ['value' => true];
     for ($i = 0; $i < 66; ++$i) { $data = ['nested' => $data]; }
-    try { expect(fn() => ConfigLoader::export(new Config($data, new Environment([])), $file))->toThrow(ConfigException::class, 'Maximum nesting depth'); expect(is_file($file))->toBeFalse(); }
+    try { expect(fn() => ConfigLoader::export(new Config($data, new Environment([])), $file))->toThrow(ConfigException::class, 'configuration cache preflight'); expect(is_file($file))->toBeFalse(); }
     finally { @unlink($file); }
 });
