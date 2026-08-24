@@ -13,6 +13,7 @@ use Componenta\Config\LazyValue;
 use Componenta\VarExport\ClosureExporter;
 use Componenta\VarExport\Config\ExportConfig;
 use Componenta\VarExport\Contract\ClosureExporterInterface;
+use Componenta\VarExport\Contract\ContextualClosureExporterInterface;
 use Componenta\VarExport\Contract\ContextualObjectExporterInterface;
 use Componenta\VarExport\Contract\ContextualValueExporterInterface;
 use Componenta\VarExport\Contract\ObjectExporterInterface;
@@ -76,7 +77,10 @@ final readonly class ConfigCacheObjectExporter implements ContextualObjectExport
     private function exportLazyValue(LazyValue $value, ExportContext $context): string
     {
         try {
-            $callback = $this->exportCallback($value->callback(), $context->child('callback', str_repeat($this->config->indent, $context->depth + 1)));
+            $callback = $this->exportCallback(
+                $value->callback(),
+                $context->child('callback', $context->baseIndent . $this->config->indent),
+            );
         } catch (Throwable $e) {
             throw new RuntimeException(sprintf('Cannot export LazyValue at %s: %s', $context->location(), $e->getMessage()), previous: $e);
         }
@@ -89,8 +93,9 @@ final readonly class ConfigCacheObjectExporter implements ContextualObjectExport
     {
         if ($this->valueExporter === null) { throw new RuntimeException(sprintf('%s requires a contextual value dispatcher to export nested values.', self::class)); }
         $parts = [];
+        $childIndent = $context->baseIndent . $this->config->indent;
         foreach ($arguments as $name => $value) {
-            $child = $context->child($name, str_repeat($this->config->indent, $context->depth + 1));
+            $child = $context->child($name, $childIndent);
             try { $parts[] = $this->valueExporter->exportValue($value, $child); }
             catch (Throwable $e) { throw new RuntimeException(sprintf('Cannot export config cache value at %s: %s', $child->location(), $e->getMessage()), previous: $e); }
         }
@@ -111,14 +116,19 @@ final readonly class ConfigCacheObjectExporter implements ContextualObjectExport
     {
         $reflection = new ReflectionFunction($callback);
         if ($reflection->getName() === '{closure}' || str_starts_with($reflection->getName(), '{closure:')) {
-            return $this->closureExporter->exportWithDepth($callback, $context->depth);
+            return $this->closureExporter instanceof ContextualClosureExporterInterface
+                ? $this->closureExporter->exportWithContext($callback, $context)
+                : $this->closureExporter->exportWithDepth($callback, $context->depth);
         }
 
         $boundObject = $reflection->getClosureThis();
         if ($boundObject !== null) {
             $method = new ReflectionMethod($boundObject, $reflection->getName());
             if (!$method->isPublic()) { throw new RuntimeException(sprintf('Cannot persist LazyValue callback %s::%s(): method is not public.', $boundObject::class, $method->getName())); }
-            $target = $this->exportCallableTarget($boundObject, $context->child('target', str_repeat($this->config->indent, $context->depth + 1)));
+            $target = $this->exportCallableTarget(
+                $boundObject,
+                $context->child('target', $context->baseIndent . $this->config->indent),
+            );
             return sprintf('\\Closure::fromCallable([%s, %s])', $target, var_export($method->getName(), true));
         }
 
