@@ -15,7 +15,7 @@ interface FileReaderInterface
      * Read and parse a configuration file.
      *
      * @param string $file Path to the configuration file
-     * @return array|null Parsed data or null if format not supported
+     * @return array<array-key, mixed>|null Parsed data or null if format not supported
      */
     public function readFile(string $file): ?array;
 }
