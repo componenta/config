@@ -54,6 +54,11 @@ function config(ContainerInterface $container): Config
     return $config;
 }
 
+/**
+ * @param array<array-key, mixed> $base
+ * @param array<array-key, mixed> $override
+ * @return array<array-key, mixed>
+ */
 function config_merge(array $base, array $override): array
 {
     return ConfigMerger::merge($base, $override);
