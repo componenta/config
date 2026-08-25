@@ -41,8 +41,18 @@ final readonly class ConfigCacheObjectExporter implements ContextualObjectExport
         $this->fallback = $fallback ?? new ObjectExporter($config);
     }
 
-    public function export(object $object): string { return $this->exportWithContext($object, ExportContext::root()); }
-    public function exportWithDepth(object $object, int $depth): string { return $this->exportWithContext($object, new ExportContext($depth, baseIndent: str_repeat($this->config->indent, $depth))); }
+    public function export(object $object): string
+    {
+        return $this->exportWithContext($object, ExportContext::root());
+    }
+
+    public function exportWithDepth(object $object, int $depth): string
+    {
+        return $this->exportWithContext(
+            $object,
+            new ExportContext($depth, baseIndent: str_repeat($this->config->indent, $depth)),
+        );
+    }
 
     public function exportWithContext(object $object, ExportContext $context): string
     {
@@ -59,18 +69,31 @@ final readonly class ConfigCacheObjectExporter implements ContextualObjectExport
 
     public function supports(object $object): bool
     {
-        try { $this->export($object); return true; } catch (Throwable) { return false; }
+        try {
+            $this->export($object);
+
+            return true;
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     public function withConfig(ExportConfig $config): static
     {
-        return new self($config, $this->closureExporter->withConfig($config), $this->fallback->withConfig($config));
+        return new self(
+            $config,
+            $this->closureExporter->withConfig($config),
+            $this->fallback->withConfig($config),
+        );
     }
 
     public function withValueExporter(ContextualValueExporterInterface $valueExporter): static
     {
         $fallback = $this->fallback;
-        if ($fallback instanceof ContextualObjectExporterInterface) { $fallback = $fallback->withValueExporter($valueExporter); }
+        if ($fallback instanceof ContextualObjectExporterInterface) {
+            $fallback = $fallback->withValueExporter($valueExporter);
+        }
+
         return new self($this->config, $this->closureExporter, $fallback, $valueExporter);
     }
 
@@ -82,33 +105,68 @@ final readonly class ConfigCacheObjectExporter implements ContextualObjectExport
                 $context->child('callback', $context->baseIndent . $this->config->indent),
             );
         } catch (Throwable $e) {
-            throw new RuntimeException(sprintf('Cannot export LazyValue at %s: %s', $context->location(), $e->getMessage()), previous: $e);
+            throw new RuntimeException(
+                sprintf('Cannot export LazyValue at %s: %s', $context->location(), $e->getMessage()),
+                previous: $e,
+            );
         }
 
-        return sprintf('new \\%s(%s, cache: %s)', LazyValue::class, $callback, $value->cache ? 'true' : 'false');
+        return sprintf(
+            'new \\%s(%s, cache: %s)',
+            LazyValue::class,
+            $callback,
+            $value->cache ? 'true' : 'false',
+        );
     }
 
     /** @param class-string $class @param array<string, mixed> $arguments */
     private function exportConstructed(string $class, array $arguments, ExportContext $context): string
     {
-        if ($this->valueExporter === null) { throw new RuntimeException(sprintf('%s requires a contextual value dispatcher to export nested values.', self::class)); }
+        if ($this->valueExporter === null) {
+            throw new RuntimeException(sprintf(
+                '%s requires a contextual value dispatcher to export nested values.',
+                self::class,
+            ));
+        }
+
         $parts = [];
         $childIndent = $context->baseIndent . $this->config->indent;
         foreach ($arguments as $name => $value) {
             $child = $context->child($name, $childIndent);
-            try { $parts[] = $this->valueExporter->exportValue($value, $child); }
-            catch (Throwable $e) { throw new RuntimeException(sprintf('Cannot export config cache value at %s: %s', $child->location(), $e->getMessage()), previous: $e); }
+            try {
+                $parts[] = $this->valueExporter->exportValue($value, $child);
+            } catch (Throwable $e) {
+                throw new RuntimeException(
+                    sprintf('Cannot export config cache value at %s: %s', $child->location(), $e->getMessage()),
+                    previous: $e,
+                );
+            }
         }
+
         return sprintf('new \\%s(%s)', ltrim($class, '\\'), implode(', ', $parts));
     }
 
     private function exportCallableTarget(object $target, ExportContext $context): string
     {
         $reflection = new ReflectionClass($target);
-        if ($reflection->isReadOnly() && !$reflection->isAnonymous() && $reflection->getConstructor() === null && array_filter($reflection->getProperties(), static fn(\ReflectionProperty $property): bool => !$property->isStatic()) === []) {
+        if (
+            $reflection->isReadOnly()
+            && !$reflection->isAnonymous()
+            && $reflection->getConstructor() === null
+            && array_filter(
+                $reflection->getProperties(),
+                static fn(\ReflectionProperty $property): bool => !$property->isStatic(),
+            ) === []
+        ) {
             return 'new \\' . $reflection->getName() . '()';
         }
-        if ($this->valueExporter === null) { throw new RuntimeException('Cannot persist bound LazyValue callback without a contextual value dispatcher.'); }
+
+        if ($this->valueExporter === null) {
+            throw new RuntimeException(
+                'Cannot persist bound LazyValue callback without a contextual value dispatcher.',
+            );
+        }
+
         return $this->valueExporter->exportValue($target, $context);
     }
 
@@ -124,26 +182,54 @@ final readonly class ConfigCacheObjectExporter implements ContextualObjectExport
         $boundObject = $reflection->getClosureThis();
         if ($boundObject !== null) {
             $method = new ReflectionMethod($boundObject, $reflection->getName());
-            if (!$method->isPublic()) { throw new RuntimeException(sprintf('Cannot persist LazyValue callback %s::%s(): method is not public.', $boundObject::class, $method->getName())); }
+            if (!$method->isPublic()) {
+                throw new RuntimeException(sprintf(
+                    'Cannot persist LazyValue callback %s::%s(): method is not public.',
+                    $boundObject::class,
+                    $method->getName(),
+                ));
+            }
             $target = $this->exportCallableTarget(
                 $boundObject,
                 $context->child('target', $context->baseIndent . $this->config->indent),
             );
-            return sprintf('\\Closure::fromCallable([%s, %s])', $target, var_export($method->getName(), true));
+
+            return sprintf(
+                '\\Closure::fromCallable([%s, %s])',
+                $target,
+                var_export($method->getName(), true),
+            );
         }
 
         $scope = $reflection->getClosureScopeClass();
         if ($scope !== null) {
             $calledClass = $reflection->getClosureCalledClass() ?? $scope;
             $method = new ReflectionMethod($calledClass->getName(), $reflection->getName());
-            if (!$method->isPublic() || !$method->isStatic()) { throw new RuntimeException(sprintf('Cannot persist LazyValue callback %s::%s(): method must be public static.', $calledClass->getName(), $method->getName())); }
-            return sprintf('static fn($context) => \\%s::%s($context)', ltrim($calledClass->getName(), '\\'), $method->getName());
+            if (!$method->isPublic() || !$method->isStatic()) {
+                throw new RuntimeException(sprintf(
+                    'Cannot persist LazyValue callback %s::%s(): method must be public static.',
+                    $calledClass->getName(),
+                    $method->getName(),
+                ));
+            }
+
+            return sprintf(
+                'static fn($context) => \\%s::%s($context)',
+                ltrim($calledClass->getName(), '\\'),
+                $method->getName(),
+            );
         }
 
         if (!$reflection->isInternal()) {
-            throw new RuntimeException(sprintf('Cannot persist user-defined named function LazyValue callback "%s": use an anonymous closure or an autoloadable public method.', $reflection->getName()));
+            throw new RuntimeException(sprintf(
+                'Cannot persist user-defined named function LazyValue callback "%s": use an anonymous closure or an autoloadable public method.',
+                $reflection->getName(),
+            ));
         }
 
-        return sprintf('static fn($context) => \\%s($context)', ltrim($reflection->getName(), '\\'));
+        return sprintf(
+            'static fn($context) => \\%s($context)',
+            ltrim($reflection->getName(), '\\'),
+        );
     }
 }
