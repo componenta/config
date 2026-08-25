@@ -9,7 +9,7 @@ use RuntimeException;
 /** Exception thrown when runtime environment loading fails. */
 class EnvLoaderException extends RuntimeException implements ConfigExceptionInterface
 {
-    /** @param string[] $missing Missing variable names */
+    /** @param list<string> $missing Missing variable names */
     public static function requiredVariablesMissing(array $missing): self
     {
         return new self(
