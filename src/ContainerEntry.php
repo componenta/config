@@ -8,7 +8,6 @@ use InvalidArgumentException;
 
 final readonly class ContainerEntry
 {
-    /** @param class-string|null $type */
     public function __construct(
         public string $id,
         public ?string $type = null,
