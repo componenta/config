@@ -48,7 +48,7 @@ it('resolves Config from a PSR container and validates its type', function (): v
 
     expect(config($container))->toBe($expected);
 
-    $invalid = new class implements ContainerInterface {
+    $invalid = new class () implements ContainerInterface {
         public function get(string $id): mixed
         {
             return new stdClass();
