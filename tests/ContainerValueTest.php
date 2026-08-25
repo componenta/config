@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-use Componenta\Config\ContainerValue;
-use Componenta\Config\ContainerEntry;
 use Componenta\Config\Config;
 use Componenta\Config\ConfigEntry;
 use Componenta\Config\ConfigPath;
+use Componenta\Config\ContainerEntry;
+use Componenta\Config\ContainerValue;
 use Componenta\Config\Environment;
 use Componenta\Config\EnvironmentEntry;
 use Componenta\Config\Exception\ConfigException;
