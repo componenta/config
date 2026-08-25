@@ -60,7 +60,7 @@ class ConfigProvider
         return $config;
     }
 
-    /** @return iterable<callable(): iterable<array-key, mixed>> */
+    /** @return iterable<mixed> */
     protected function getProviders(): iterable
     {
         return [];
@@ -163,7 +163,7 @@ class ConfigProvider
 
         return array_filter(
             $dependencies,
-            static fn(mixed $value): bool => $value !== [] && $value !== null,
+            static fn(mixed $value): bool => $value !== [],
         );
     }
 }
