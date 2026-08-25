@@ -52,6 +52,11 @@ final class ConfigMerger
         ConfigKey::ATTRIBUTE_CAPABILITIES => true,
     ];
 
+    /**
+     * @param array<array-key, mixed> $base
+     * @param array<array-key, mixed> $override
+     * @return array<array-key, mixed>
+     */
     public static function merge(array $base, array $override): array
     {
         self::assertMergeableDependencies($base);
@@ -60,6 +65,11 @@ final class ConfigMerger
         return self::mergeArray($base, $override, root: true);
     }
 
+    /**
+     * @param array<array-key, mixed> $base
+     * @param array<array-key, mixed> $override
+     * @return array<array-key, mixed>
+     */
     private static function mergeArray(
         array $base,
         array $override,
@@ -96,6 +106,11 @@ final class ConfigMerger
         return $base;
     }
 
+    /**
+     * @param array<array-key, mixed> $base
+     * @param array<array-key, mixed> $override
+     * @return array<array-key, mixed>
+     */
     private static function mergeDependencies(
         array $base,
         array $override,
@@ -142,6 +157,11 @@ final class ConfigMerger
         return $base;
     }
 
+    /**
+     * @param array<array-key, mixed> $base
+     * @param array<array-key, mixed> $override
+     * @return array<array-key, mixed>
+     */
     private static function mergeInvokables(array $base, array $override): array
     {
         foreach ($override as $key => $value) {
@@ -156,6 +176,11 @@ final class ConfigMerger
         return $base;
     }
 
+    /**
+     * @param array<array-key, mixed> $base
+     * @param array<array-key, mixed> $override
+     * @return array<array-key, mixed>
+     */
     private static function mergeDelegators(array $base, array $override): array
     {
         foreach ($override as $id => $pipeline) {
@@ -273,7 +298,10 @@ final class ConfigMerger
         }
     }
 
-    /** @phpstan-assert-if-true array{object|string, non-empty-string} $value */
+    /**
+     * @param array<array-key, mixed> $value
+     * @phpstan-assert-if-true array{object|string, non-empty-string} $value
+     */
     private static function isCallablePair(array $value): bool
     {
         if (array_keys($value) !== [0, 1]
