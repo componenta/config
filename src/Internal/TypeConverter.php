@@ -107,6 +107,7 @@ final class TypeConverter
         return null;
     }
 
+    /** @return array<array-key, mixed> */
     public static function toArray(mixed $value): array
     {
         if (is_array($value)) {
