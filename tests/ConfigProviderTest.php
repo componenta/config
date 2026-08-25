@@ -18,20 +18,47 @@ it('returns an empty dependency section for the base provider', function (): voi
 });
 
 it('transports the DI v5 dependency schema without reimplementing DI normalization', function (): void {
-    $provider = new class extends ConfigProvider {
-        protected function getFactories(): array { return ['service' => 'Factory']; }
-        protected function getInvokables(): array { return ['Service', 'alias' => 'AliasedService']; }
-        protected function getAliases(): array { return ['explicit' => 'ExplicitService']; }
+    $provider = new class () extends ConfigProvider {
+        protected function getFactories(): array
+        {
+            return ['service' => 'Factory'];
+        }
+        protected function getInvokables(): array
+        {
+            return ['Service', 'alias' => 'AliasedService'];
+        }
+        protected function getAliases(): array
+        {
+            return ['explicit' => 'ExplicitService'];
+        }
         protected function getDelegators(): array
         {
             return ['service' => [[ConfigProviderCallablePairFixture::class, 'decorate']]];
         }
-        protected function getServices(): array { return ['ready' => new stdClass()]; }
-        protected function getParameterResolvers(): array { return [900 => 'Resolver']; }
-        protected function shouldReplaceParameterResolvers(): ?bool { return true; }
-        protected function getAttributeDefinitions(): array { return ['Definition']; }
-        protected function shouldReplaceAttributeDefinitions(): ?bool { return false; }
-        protected function getAttributeCapabilities(): array { return ['Capability']; }
+        protected function getServices(): array
+        {
+            return ['ready' => new stdClass()];
+        }
+        protected function getParameterResolvers(): array
+        {
+            return [900 => 'Resolver'];
+        }
+        protected function shouldReplaceParameterResolvers(): ?bool
+        {
+            return true;
+        }
+        protected function getAttributeDefinitions(): array
+        {
+            return ['Definition'];
+        }
+        protected function shouldReplaceAttributeDefinitions(): ?bool
+        {
+            return false;
+        }
+        protected function getAttributeCapabilities(): array
+        {
+            return ['Capability'];
+        }
     };
 
     $dependencies = $provider()[ConfigKey::DEPENDENCIES];
@@ -52,7 +79,7 @@ it('transports the DI v5 dependency schema without reimplementing DI normalizati
 });
 
 it('preserves numeric application config keys produced by the provider', function (): void {
-    $provider = new class extends ConfigProvider {
+    $provider = new class () extends ConfigProvider {
         protected function getConfig(): array
         {
             return [404 => 'not-found', 500 => 'server-error'];
@@ -68,7 +95,7 @@ it('preserves numeric application config keys produced by the provider', functio
 });
 
 it('rejects direct callable-pair delegators even without child providers', function (): void {
-    $provider = new class extends ConfigProvider {
+    $provider = new class () extends ConfigProvider {
         protected function getDelegators(): array
         {
             return [
@@ -82,7 +109,7 @@ it('rejects direct callable-pair delegators even without child providers', funct
 });
 
 it('leaves alias compatibility to DI v5 canonicalization', function (): void {
-    $provider = new class extends ConfigProvider {
+    $provider = new class () extends ConfigProvider {
         protected function getInvokables(): array
         {
             return ['service' => 'ConcreteService'];
@@ -107,9 +134,15 @@ it('leaves alias compatibility to DI v5 canonicalization', function (): void {
 });
 
 it('merges child providers after the parent and accepts iterable output', function (): void {
-    $provider = new class extends ConfigProvider {
-        protected function getFactories(): array { return ['service' => 'BaseFactory']; }
-        protected function getConfig(): array { return ['app' => ['name' => 'base', 'debug' => false]]; }
+    $provider = new class () extends ConfigProvider {
+        protected function getFactories(): array
+        {
+            return ['service' => 'BaseFactory'];
+        }
+        protected function getConfig(): array
+        {
+            return ['app' => ['name' => 'base', 'debug' => false]];
+        }
         protected function getProviders(): iterable
         {
             yield static function (): Traversable {
@@ -133,11 +166,14 @@ it('merges child providers after the parent and accepts iterable output', functi
 });
 
 it('uses tri-state replacement hooks so inherited providers do not cancel explicit flags', function (): void {
-    $provider = new class extends ConfigProvider {
-        protected function shouldReplaceAttributeDefinitions(): ?bool { return true; }
+    $provider = new class () extends ConfigProvider {
+        protected function shouldReplaceAttributeDefinitions(): ?bool
+        {
+            return true;
+        }
         protected function getProviders(): iterable
         {
-            return [new class extends ConfigProvider {}];
+            return [new class () extends ConfigProvider {}];
         }
     };
 
@@ -146,13 +182,19 @@ it('uses tri-state replacement hooks so inherited providers do not cancel explic
 });
 
 it('allows a later provider to explicitly cancel a replacement flag', function (): void {
-    $provider = new class extends ConfigProvider {
-        protected function shouldReplaceAttributeDefinitions(): ?bool { return true; }
+    $provider = new class () extends ConfigProvider {
+        protected function shouldReplaceAttributeDefinitions(): ?bool
+        {
+            return true;
+        }
         protected function getProviders(): iterable
         {
             return [
-                new class extends ConfigProvider {
-                    protected function shouldReplaceAttributeDefinitions(): ?bool { return false; }
+                new class () extends ConfigProvider {
+                    protected function shouldReplaceAttributeDefinitions(): ?bool
+                    {
+                        return false;
+                    }
                 },
             ];
         }
@@ -171,7 +213,7 @@ it('omits unspecified replacement flags', function (): void {
 });
 
 it('rejects application configuration that shadows the dependency root', function (): void {
-    $provider = new class extends ConfigProvider {
+    $provider = new class () extends ConfigProvider {
         protected function getConfig(): array
         {
             return [ConfigKey::DEPENDENCIES => ['factories' => ['unsafe' => 'override']]];
@@ -183,14 +225,17 @@ it('rejects application configuration that shadows the dependency root', functio
 });
 
 it('rejects non-callable child providers and invalid child output', function (): void {
-    $invalidProvider = new class extends ConfigProvider {
-        protected function getProviders(): iterable { return ['not-callable']; }
+    $invalidProvider = new class () extends ConfigProvider {
+        protected function getProviders(): iterable
+        {
+            return ['not-callable'];
+        }
     };
 
     expect($invalidProvider(...))
         ->toThrow(InvalidArgumentException::class, 'must be callable');
 
-    $invalidOutput = new class extends ConfigProvider {
+    $invalidOutput = new class () extends ConfigProvider {
         protected function getProviders(): iterable
         {
             return [static fn(): string => 'invalid'];
