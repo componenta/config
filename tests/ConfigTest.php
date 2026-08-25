@@ -113,7 +113,9 @@ it('caches a LazyValue once per Config context', function (): void {
 it('can disable LazyValue caching', function (): void {
     $calls = 0;
     $config = new Config([
-        'lazy' => new LazyValue(function () use (&$calls): int { return ++$calls; }, cache: false),
+        'lazy' => new LazyValue(function () use (&$calls): int {
+            return ++$calls;
+        }, cache: false),
     ]);
 
     expect($config->int('lazy'))->toBe(1)
@@ -169,7 +171,9 @@ it('is read-only through ArrayAccess and supports integer offsets', function ():
 
     expect(fn() => $config['key'] = 'changed')
         ->toThrow(RuntimeException::class, 'immutable')
-        ->and(function () use ($config): void { unset($config['key']); })
+        ->and(function () use ($config): void {
+            unset($config['key']);
+        })
         ->toThrow(RuntimeException::class, 'immutable');
 });
 
