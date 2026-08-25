@@ -145,3 +145,21 @@ it('rejects user-defined named function LazyValue callbacks before writing a non
         @unlink($file);
     }
 });
+
+it('rejects shared bound object targets across LazyValue callbacks', function (): void {
+    $file = sys_get_temp_dir() . '/componenta_lazy_value_shared_target_' . bin2hex(random_bytes(6)) . '.php';
+    $target = new LazyValueObjectCallable();
+
+    try {
+        $config = new Config([
+            'first' => new LazyValue([$target, 'resolve']),
+            'second' => new LazyValue([$target, 'resolve']),
+        ], new Environment(['LAZY_VALUE_ENV' => 'build']));
+
+        expect(fn() => ConfigLoader::export($config, $file))
+            ->toThrow(ConfigException::class, 'shared object identity');
+        expect(is_file($file))->toBeFalse();
+    } finally {
+        @unlink($file);
+    }
+});
