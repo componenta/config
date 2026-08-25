@@ -15,6 +15,8 @@ use InvalidArgumentException;
  *
  * String keys are looked up literally. ConfigPath values are converted to
  * UPPER_SNAKE_CASE (`path('database.host')` becomes `DATABASE_HOST`).
+ *
+ * @implements \IteratorAggregate<string, mixed>
  */
 final readonly class Environment implements \Countable, \IteratorAggregate, Arrayable
 {
@@ -39,14 +41,12 @@ final readonly class Environment implements \Countable, \IteratorAggregate, Arra
     /** @param list<string>|null $keys */
     public static function fromGlobals(?array $keys = null): self
     {
+        /** @var array<string, mixed> $data */
         $data = [];
-        $native = getenv();
 
-        if (is_array($native)) {
-            foreach ($native as $key => $value) {
-                if (is_string($key) && $key !== '' && is_string($value)) {
-                    $data[$key] = $value;
-                }
+        foreach (getenv() as $key => $value) {
+            if ($key !== '') {
+                $data[$key] = $value;
             }
         }
 
@@ -175,6 +175,10 @@ final readonly class Environment implements \Countable, \IteratorAggregate, Arra
         return $result;
     }
 
+    /**
+     * @param array<array-key, mixed>|DefaultValue $default
+     * @return array<array-key, mixed>
+     */
     public function array(
         string|ConfigPath $key,
         array|DefaultValue $default = DefaultValue::None,
@@ -221,6 +225,7 @@ final readonly class Environment implements \Countable, \IteratorAggregate, Arra
         return $this->data === [];
     }
 
+    /** @return \Traversable<string, mixed> */
     public function getIterator(): \Traversable
     {
         return new \ArrayIterator($this->data);
