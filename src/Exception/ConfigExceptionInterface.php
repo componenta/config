@@ -11,6 +11,4 @@ use Throwable;
  *
  * Allows catching all library exceptions with a single catch block.
  */
-interface ConfigExceptionInterface extends Throwable
-{
-}
+interface ConfigExceptionInterface extends Throwable {}
