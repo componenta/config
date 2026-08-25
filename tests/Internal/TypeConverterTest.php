@@ -53,8 +53,11 @@ it('converts finite floating point values', function (): void {
 });
 
 it('converts scalar and Stringable values to string', function (): void {
-    $stringable = new class implements Stringable {
-        public function __toString(): string { return 'value'; }
+    $stringable = new class () implements Stringable {
+        public function __toString(): string
+        {
+            return 'value';
+        }
     };
 
     expect(TypeConverter::toString('string'))->toBe('string')
