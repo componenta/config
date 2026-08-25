@@ -16,9 +16,13 @@ use InvalidArgumentException;
  * Literal integer/string keys address top-level values directly. ConfigPath is
  * reserved for nested access. Environment is always present and represents the
  * runtime environment snapshot associated with this configuration.
+ *
+ * @implements \IteratorAggregate<array-key, mixed>
+ * @implements \ArrayAccess<array-key, mixed>
  */
 final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arrayable
 {
+    /** @param array<array-key, mixed> $data */
     public function __construct(
         public readonly array $data,
         public readonly Environment $environment = new Environment([]),
@@ -106,6 +110,7 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
         return $result;
     }
 
+    /** @return array<array-key, mixed> */
     public function array(
         int|string|ConfigPath $key,
         mixed $default = DefaultValue::None,
@@ -113,12 +118,11 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
         return TypeConverter::toArray($this->get($key, $default));
     }
 
-    /**
-     * @param int|string|ConfigPath|array<int|string|ConfigPath> $keys
-     */
+    /** @param int|string|ConfigPath|array<int|string|ConfigPath> $keys */
     public function only(int|string|ConfigPath|array $keys): self
     {
         $keys = is_array($keys) ? $keys : [$keys];
+        /** @var array<array-key, mixed> $filtered */
         $filtered = [];
 
         foreach ($keys as $key) {
@@ -139,9 +143,7 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
         return new self($filtered, $this->environment);
     }
 
-    /**
-     * @param int|string|ConfigPath|array<int|string|ConfigPath> $keys
-     */
+    /** @param int|string|ConfigPath|array<int|string|ConfigPath> $keys */
     public function except(int|string|ConfigPath|array $keys): self
     {
         $keys = is_array($keys) ? $keys : [$keys];
@@ -158,6 +160,7 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
         return new self($filtered, $this->environment);
     }
 
+    /** @return array<array-key, mixed> */
     public function toArray(): array
     {
         return $this->data;
@@ -168,6 +171,7 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
         return count($this->data);
     }
 
+    /** @return \Traversable<array-key, mixed> */
     public function getIterator(): \Traversable
     {
         return new \ArrayIterator($this->data);
@@ -253,7 +257,10 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
         return $current;
     }
 
-    /** @param list<string> $segments */
+    /**
+     * @param array<array-key, mixed> $array
+     * @param list<string> $segments
+     */
     private function setNestedValue(array &$array, array $segments, mixed $value): void
     {
         $current = &$array;
@@ -273,7 +280,10 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
         }
     }
 
-    /** @param list<string> $segments */
+    /**
+     * @param array<array-key, mixed> $array
+     * @param list<string> $segments
+     */
     private function unsetNestedValue(array &$array, array $segments): void
     {
         $current = &$array;
