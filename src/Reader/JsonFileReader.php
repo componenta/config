@@ -9,6 +9,7 @@ use JsonException;
 
 final class JsonFileReader implements FileReaderInterface
 {
+    /** @return array<array-key, mixed>|null */
     public function readFile(string $file): ?array
     {
         if (!str_ends_with(strtolower($file), '.json')) {
