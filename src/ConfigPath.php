@@ -34,7 +34,6 @@ final readonly class ConfigPath implements \Stringable, Arrayable
             }
         }
 
-        /** @var non-empty-list<string> $segments */
         $this->segments = $segments;
     }
 
