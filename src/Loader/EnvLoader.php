@@ -29,16 +29,16 @@ final class EnvLoader implements EnvLoaderInterface
     private readonly array $filenames;
 
     /**
-     * @param string|list<string> $paths
-     * @param list<string>|null $required
-     * @param list<string>|null $filenames Exact basenames in precedence order.
+     * @param string|array<array-key, mixed> $paths
+     * @param array<array-key, mixed>|null $required
+     * @param array<array-key, mixed>|null $filenames Exact basenames in precedence order.
      */
     public function __construct(
         string|array $paths,
         ?array $required = null,
         ?array $filenames = null,
     ) {
-        $this->paths = $this->normalizePaths((array) $paths);
+        $this->paths = $this->normalizePaths(is_array($paths) ? $paths : [$paths]);
         $this->required = $this->normalizeRequired($required ?? []);
         $this->filenames = $this->normalizeFilenames($filenames ?? self::DEFAULT_FILENAMES);
     }
@@ -97,9 +97,13 @@ final class EnvLoader implements EnvLoaderInterface
         return $files;
     }
 
-    /** @param list<mixed> $paths @return list<string> */
+    /**
+     * @param array<array-key, mixed> $paths
+     * @return list<string>
+     */
     private function normalizePaths(array $paths): array
     {
+        /** @var list<string> $normalized */
         $normalized = [];
 
         foreach ($paths as $path) {
@@ -117,9 +121,13 @@ final class EnvLoader implements EnvLoaderInterface
         return $normalized;
     }
 
-    /** @param list<mixed> $required @return list<string> */
+    /**
+     * @param array<array-key, mixed> $required
+     * @return list<string>
+     */
     private function normalizeRequired(array $required): array
     {
+        /** @var list<string> $normalized */
         $normalized = [];
 
         foreach ($required as $name) {
@@ -139,9 +147,13 @@ final class EnvLoader implements EnvLoaderInterface
         return $normalized;
     }
 
-    /** @param list<mixed> $filenames @return list<string> */
+    /**
+     * @param array<array-key, mixed> $filenames
+     * @return list<string>
+     */
     private function normalizeFilenames(array $filenames): array
     {
+        /** @var list<string> $normalized */
         $normalized = [];
 
         foreach ($filenames as $filename) {
