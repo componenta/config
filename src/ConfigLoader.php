@@ -29,7 +29,7 @@ final class ConfigLoader
 
     public static function load(Environment $environment, callable ...$providers): Config
     {
-        return new Config(self::merge($providers), $environment);
+        return new Config(self::merge(array_values($providers)), $environment);
     }
 
     public static function loadFromFile(string $file, Environment $environment): Config
@@ -70,7 +70,10 @@ final class ConfigLoader
         ]);
     }
 
-    /** @param array<array-key, mixed> $cache @return array<array-key, mixed> */
+    /**
+     * @param array<array-key, mixed> $cache
+     * @return array<array-key, mixed>
+     */
     private static function configFromCache(array $cache): array
     {
         foreach ($cache as $key => $_value) {
@@ -93,6 +96,7 @@ final class ConfigLoader
             throw new ConfigException('Configuration cache "config" entry must be an array.');
         }
 
+        /** @var array<array-key, mixed> $config */
         $config = $cache['config'];
         if (array_key_exists(ConfigKey::DEPENDENCIES, $config)) {
             throw new ConfigException(sprintf(
@@ -241,7 +245,7 @@ final class ConfigLoader
         }
 
         $location = self::formatPath($path);
-        if ($seen->contains($value)) {
+        if ($seen->offsetExists($value)) {
             throw new \RuntimeException(sprintf(
                 'Configuration cache cannot preserve shared object identity between %s and %s. '
                 . 'Use distinct value objects or an explicit cache representation.',
@@ -354,9 +358,13 @@ final class ConfigLoader
         }
     }
 
-    /** @param list<callable> $providers @return array<array-key, mixed> */
+    /**
+     * @param list<callable(): mixed> $providers
+     * @return array<array-key, mixed>
+     */
     private static function merge(array $providers): array
     {
+        /** @var array<array-key, mixed> $merged */
         $merged = [];
 
         foreach ($providers as $provider) {
