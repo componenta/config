@@ -119,7 +119,10 @@ final readonly class ConfigCacheObjectExporter implements ContextualObjectExport
         );
     }
 
-    /** @param class-string $class @param array<string, mixed> $arguments */
+    /**
+     * @param class-string $class
+     * @param array<string, mixed> $arguments
+     */
     private function exportConstructed(string $class, array $arguments, ExportContext $context): string
     {
         if ($this->valueExporter === null) {
