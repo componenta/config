@@ -23,20 +23,33 @@ it('persists LazyValue nested inside ConfigEntry default through the root dispat
         $loaded = ConfigLoader::loadFromFile($file, new Environment([]));
         $entry = $loaded->get('entry');
         expect($entry)->toBeInstanceOf(ConfigEntry::class)->and($entry->default)->toBeInstanceOf(LazyValue::class)->and($entry->resolve($loaded))->toBe('runtime-value');
-    } finally { @unlink($file); }
+    } finally {
+        @unlink($file);
+    }
 });
 
 it('rejects arbitrary generic readonly objects from persistent config', function (): void {
     $file = sys_get_temp_dir() . '/componenta_generic_readonly_' . bin2hex(random_bytes(6)) . '.php';
-    $object = new readonly class ('value') { public function __construct(public string $value) {} };
-    try { expect(fn() => ConfigLoader::export(new Config(['object' => $object], new Environment([])), $file))->toThrow(ConfigException::class, 'Generic readonly-object export is disabled'); expect(is_file($file))->toBeFalse(); }
-    finally { @unlink($file); }
+    $object = new readonly class ('value') {
+        public function __construct(public string $value) {}
+    };
+    try {
+        expect(fn() => ConfigLoader::export(new Config(['object' => $object], new Environment([])), $file))->toThrow(ConfigException::class, 'Generic readonly-object export is disabled');
+        expect(is_file($file))->toBeFalse();
+    } finally {
+        @unlink($file);
+    }
 });
 
 it('rejects source-root-dependent closures from portable config artifacts', function (): void {
-    $file = sys_get_temp_dir() . '/componenta_source_path_' . bin2hex(random_bytes(6)) . '.php'; $closure = static fn(): string => __FILE__;
-    try { expect(fn() => ConfigLoader::export(new Config(['callback' => $closure], new Environment([])), $file))->toThrow(ConfigException::class, '__FILE__'); expect(is_file($file))->toBeFalse(); }
-    finally { @unlink($file); }
+    $file = sys_get_temp_dir() . '/componenta_source_path_' . bin2hex(random_bytes(6)) . '.php';
+    $closure = static fn(): string => __FILE__;
+    try {
+        expect(fn() => ConfigLoader::export(new Config(['callback' => $closure], new Environment([])), $file))->toThrow(ConfigException::class, '__FILE__');
+        expect(is_file($file))->toBeFalse();
+    } finally {
+        @unlink($file);
+    }
 });
 
 it('rejects namespace-fallback function calls from portable config artifacts', function (): void {
@@ -47,16 +60,22 @@ it('rejects namespace-fallback function calls from portable config artifacts', f
         $closure = require $source;
         expect(fn() => ConfigLoader::export(new Config(['callback' => $closure], new Environment([])), $cache))->toThrow(ConfigException::class, 'unqualified function');
         expect(is_file($cache))->toBeFalse();
-    } finally { @unlink($cache); @unlink($source); }
+    } finally {
+        @unlink($cache);
+        @unlink($source);
+    }
 });
 
 it('reports the nested config value path when a special default is not portable', function (): void {
-    $file = sys_get_temp_dir() . '/componenta_nested_path_' . bin2hex(random_bytes(6)) . '.php'; $sourceBound = static fn(): string => __FILE__;
+    $file = sys_get_temp_dir() . '/componenta_nested_path_' . bin2hex(random_bytes(6)) . '.php';
+    $sourceBound = static fn(): string => __FILE__;
     try {
         $config = new Config(['entry' => config_entry('missing', lazy($sourceBound))], new Environment([]));
         expect(fn() => ConfigLoader::export($config, $file))->toThrow(ConfigException::class, "['default']");
         expect(is_file($file))->toBeFalse();
-    } finally { @unlink($file); }
+    } finally {
+        @unlink($file);
+    }
 });
 
 it('rejects shared LazyValue identity instead of splitting its runtime cache state', function (): void {
@@ -66,5 +85,7 @@ it('rejects shared LazyValue identity instead of splitting its runtime cache sta
         $config = new Config(['value' => 'same', 'first' => $shared, 'second' => $shared], new Environment([]));
         expect(fn() => ConfigLoader::export($config, $file))->toThrow(ConfigException::class, 'shared object identity');
         expect(is_file($file))->toBeFalse();
-    } finally { @unlink($file); }
+    } finally {
+        @unlink($file);
+    }
 });
