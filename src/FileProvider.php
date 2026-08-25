@@ -21,7 +21,7 @@ final class FileProvider
     /** @var list<FileReaderInterface> */
     private readonly array $readers;
 
-    /** @param iterable<FileReaderInterface>|null $readers */
+    /** @param iterable<mixed>|null $readers */
     public function __construct(
         private readonly string $pattern,
         ?iterable $readers = null,
@@ -47,6 +47,7 @@ final class FileProvider
     /** @return array<array-key, mixed> */
     public function __invoke(): array
     {
+        /** @var array<array-key, mixed> $config */
         $config = [];
 
         foreach ($this->files() as $file) {
