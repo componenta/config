@@ -38,7 +38,9 @@ function removeConfigLoaderRuntime(): void
 }
 
 beforeEach(function (): void {
-    @mkdir(configLoaderRuntime(), 0700, true);
+    if (!is_dir(configLoaderRuntime())) {
+        mkdir(configLoaderRuntime(), 0700, true);
+    }
 });
 
 afterEach(function (): void {
@@ -171,10 +173,12 @@ it('exports LazyValue and captured closure values as self-contained persistent c
         $file,
         new Environment(['DATABASE_HOST' => 'runtime-db']),
     );
+    $raw = $loaded->toArray();
 
     expect($loaded->string('dsn'))->toBe('dsn:runtime-db')
-        ->and($loaded->get('uncached'))->toBeInstanceOf(LazyValue::class)
-        ->and($loaded->get('uncached')->cache)->toBeFalse()
+        ->and($raw['uncached'])->toBeInstanceOf(LazyValue::class)
+        ->and($raw['uncached']->cache)->toBeFalse()
+        ->and($loaded->string('uncached'))->toBe('runtime-db')
         ->and(($loaded->get('plain_callback'))())->toBe('dsn:plain');
 });
 
