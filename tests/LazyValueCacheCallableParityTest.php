@@ -13,6 +13,13 @@ function lazyValueNamedCallable(Config $config): string
     return 'named:' . $config->environment->string('LAZY_VALUE_ENV');
 }
 
+function removeLazyValueCacheFile(string $file): void
+{
+    if (is_file($file)) {
+        unlink($file);
+    }
+}
+
 class LazyValueStaticBaseCallable
 {
     public static function resolve(Config $config): string
@@ -89,7 +96,7 @@ it('preserves autoloadable method LazyValue callables through persistent cache',
             ->toBe(LazyValueStaticCallable::class . ':runtime')
             ->and($loaded->string('object'))->toBe('object:runtime');
     } finally {
-        @unlink($file);
+        removeLazyValueCacheFile($file);
     }
 });
 
@@ -110,7 +117,7 @@ it('preserves same-class lexical scope for anonymous LazyValue closures', functi
         expect($loaded->string('scoped'))
             ->toBe('scoped:' . LazyValueScopedClosure::class . ':runtime');
     } finally {
-        @unlink($file);
+        removeLazyValueCacheFile($file);
     }
 });
 
@@ -123,10 +130,10 @@ it('rejects anonymous LazyValue closures whose lexical and called classes differ
         ], new Environment(['LAZY_VALUE_ENV' => 'build']));
 
         expect(fn() => ConfigLoader::export($config, $file))
-            ->toThrow(ConfigException::class, 'different lexical and called classes');
+            ->toThrow(ConfigException::class, 'late-static-binding state cannot be reconstructed exactly');
         expect(is_file($file))->toBeFalse();
     } finally {
-        @unlink($file);
+        removeLazyValueCacheFile($file);
     }
 });
 
@@ -142,7 +149,7 @@ it('rejects user-defined named function LazyValue callbacks before writing a non
             ->toThrow(ConfigException::class, 'user-defined named function');
         expect(is_file($file))->toBeFalse();
     } finally {
-        @unlink($file);
+        removeLazyValueCacheFile($file);
     }
 });
 
@@ -160,6 +167,6 @@ it('rejects shared bound object targets across LazyValue callbacks', function ()
             ->toThrow(ConfigException::class, 'shared object identity');
         expect(is_file($file))->toBeFalse();
     } finally {
-        @unlink($file);
+        removeLazyValueCacheFile($file);
     }
 });
