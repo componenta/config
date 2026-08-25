@@ -273,6 +273,16 @@ final class ConfigLoader
         }
 
         if ($value instanceof Closure) {
+            $boundObject = (new \ReflectionFunction($value))->getClosureThis();
+            if ($boundObject !== null) {
+                self::assertNoSharedObjectIdentity(
+                    $boundObject,
+                    $seen,
+                    [...$path, 'boundThis'],
+                    $depth + 1,
+                );
+            }
+
             return;
         }
     }
