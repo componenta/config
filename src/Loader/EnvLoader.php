@@ -6,14 +6,15 @@ namespace Componenta\Config\Loader;
 
 use Componenta\Config\Environment;
 use Componenta\Config\Exception\EnvLoaderException;
-use InvalidArgumentException;
+use Componenta\Config\Exception\InvalidConfigArgumentException;
 
 /**
  * Loads explicitly named dotenv files from one or more directories.
  *
  * Default precedence is `.env` followed by `.env.local`. Later files override
  * earlier file values; existing runtime values remain authoritative unless
- * load(override: true) is requested.
+ * load(override: true) is requested. Loading is pure and never mutates process
+ * globals.
  */
 final class EnvLoader implements EnvLoaderInterface
 {
@@ -67,19 +68,14 @@ final class EnvLoader implements EnvLoaderInterface
     public function load(bool $override = false): Environment
     {
         $loaded = $this->read() ?? [];
+        $runtime = Environment::fromGlobals()->toArray();
 
-        if ($loaded !== []) {
-            $this->populateEnvironment(
-                $loaded,
-                Environment::fromGlobals(),
-                $override,
-            );
-        }
+        $effective = $override
+            ? array_replace($runtime, $loaded)
+            : array_replace($loaded, $runtime);
+        $this->validateRequired($effective);
 
-        $environment = Environment::fromGlobals();
-        $this->validateRequired($environment->toArray());
-
-        return $environment;
+        return new Environment($effective);
     }
 
     /** @return list<string> */
@@ -108,7 +104,7 @@ final class EnvLoader implements EnvLoaderInterface
 
         foreach ($paths as $path) {
             if (!is_string($path) || $path === '' || str_contains($path, "\0")) {
-                throw new InvalidArgumentException(
+                throw new InvalidConfigArgumentException(
                     'Environment paths must be non-empty strings without null bytes.',
                 );
             }
@@ -134,7 +130,7 @@ final class EnvLoader implements EnvLoaderInterface
             if (!is_string($name)
                 || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $name) !== 1
             ) {
-                throw new InvalidArgumentException(
+                throw new InvalidConfigArgumentException(
                     'Required environment variable names must be valid identifiers.',
                 );
             }
@@ -162,7 +158,7 @@ final class EnvLoader implements EnvLoaderInterface
                 || basename($filename) !== $filename
                 || str_contains($filename, "\0")
             ) {
-                throw new InvalidArgumentException(
+                throw new InvalidConfigArgumentException(
                     'Environment filenames must be non-empty basenames.',
                 );
             }
@@ -248,21 +244,6 @@ final class EnvLoader implements EnvLoaderInterface
             '\\t' => "\t",
             '\\"' => '"',
         ]);
-    }
-
-    /** @param array<string, string> $data */
-    private function populateEnvironment(
-        array $data,
-        Environment $existing,
-        bool $override,
-    ): void {
-        foreach ($data as $key => $value) {
-            if (!$override && $existing->has($key)) {
-                continue;
-            }
-
-            $_ENV[$key] = $value;
-        }
     }
 
     /** @param array<string, mixed> $effective */

@@ -1,6 +1,6 @@
 {
     "name": "componenta/config",
-    "description": "Composable configuration, runtime environment access and cache generation for PHP 8.4+",
+    "description": "Composable configuration and runtime environment access for PHP 8.4+",
     "type": "library",
     "license": "MIT",
     "keywords": ["config", "configuration", "dotenv", "environment", "settings", "dependency-injection"],
@@ -10,7 +10,6 @@
     "require": {
         "php": "^8.4",
         "componenta/arrayable": "^1.0",
-        "componenta/var-export": "^2.0@dev",
         "psr/container": "^2.0"
     },
     "require-dev": {
@@ -23,7 +22,8 @@
     "scripts": {
         "test": "pest",
         "test-coverage": "pest --coverage --min=80",
-        "phpstan": "phpstan analyse src --level=max",
+        "test-mutation": "pest --mutate --path=src --min=80",
+        "phpstan": "phpstan analyse src tests --level=max",
         "cs-check": "php-cs-fixer fix --dry-run --diff",
         "cs-fix": "php-cs-fixer fix",
         "check": ["@cs-check", "@phpstan", "@test"]

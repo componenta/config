@@ -2,9 +2,13 @@
 
 declare(strict_types=1);
 
+namespace Componenta\Config\Tests\Exception;
+
+use Componenta\Config\Environment;
 use Componenta\Config\Exception\ConfigException;
 use Componenta\Config\Exception\ConfigExceptionInterface;
 use Componenta\Config\Exception\EnvLoaderException;
+use Componenta\Config\Exception\InvalidConfigArgumentException;
 use Componenta\Config\Exception\InvalidConfigValueException;
 use Componenta\Config\Exception\InvalidContainerValueException;
 
@@ -13,6 +17,15 @@ it('exposes a common package exception contract', function (): void {
         ->and(new InvalidConfigValueException('invalid'))->toBeInstanceOf(ConfigExceptionInterface::class)
         ->and(new InvalidContainerValueException('invalid'))->toBeInstanceOf(ConfigExceptionInterface::class)
         ->and(new EnvLoaderException('invalid'))->toBeInstanceOf(ConfigExceptionInterface::class);
+});
+
+it('reports invalid public arguments through the package exception marker', function (): void {
+    try {
+        new Environment([0 => 'invalid']);
+        throw new \LogicException('Environment should reject a numeric key.');
+    } catch (InvalidConfigArgumentException $exception) {
+        expect($exception)->toBeInstanceOf(ConfigExceptionInterface::class);
+    }
 });
 
 it('keeps structured conversion diagnostics', function (): void {

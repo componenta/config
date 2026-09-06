@@ -1,76 +1,105 @@
 # Componenta Config
 
-`componenta/config` — configuration runtime для Componenta DI v5 на PHP 8.4+. Пакет предоставляет immutable snapshots конфигурации и environment, детерминированную композицию providers, typed reads, runtime-bound environment references, явные lazy values, file providers и версионированный persistent cache конфигурации приложения.
+`componenta/config` собирает конфигурацию приложения для PHP 8.4+, делает
+доступ к окружению явным и отделяет настройки приложения от исходных описаний
+зависимостей, которые потребляет Componenta DI.
 
-В пакете нет compatibility layer для старых DI schemas и нет собственного dev/prod режима. Bootstrap-слой решает, брать данные из providers или из persistent cache.
+У пакета один путь выполнения. Провайдеры запускаются при каждом старте
+приложения во всех окружениях; Config не создаёт и не загружает постоянный кеш.
+Поэтому разработка и боевое окружение получают одинаковое поведение.
 
-## Runtime model
+## Граница ответственности
 
-`Config` всегда содержит ровно один `Environment` snapshot. `Environment` остаётся частью runtime `Config`, но никогда не сериализуется в persistent cache.
+Config отвечает за:
 
-Обычный string key является literal key; для nested lookup используется `ConfigPath`. `ConfigPath` должен содержать непустые dot-separated segments. Integer top-level keys одинаково поддерживаются `get()`, `has()`, `only()`, `except()`, `ConfigEntry` и read-only `ArrayAccess`.
+- последовательный вызов провайдеров и детерминированное структурное слияние;
+- неизменяемый `Config` приложения с одним `Environment`;
+- отдельный результат `DependencyDefinitions` с исходными секциями контейнера;
+- вычисляемые во время выполнения значения, загрузку dotenv и чтение PHP/JSON.
 
-## Typed reads
+Config не проверяет, сможет ли DI построить сервис, не нормализует описания
+зависимостей, не создаёт контейнер, не пишет кеш-файлы и не выбирает точки входа
+приложения. Это ответственность пакетов DI и приложения.
 
-Доступны `string()`, `int()`, `float()`, `bool()`, `array()`. Integer conversion выполняется без потери данных: fractional, overflow, scientific integer strings и non-finite values отклоняются. Missing key без default приводит к исключению, а сохранённый `null` считается существующим значением.
+## Установка
 
-## Runtime-bound environment values
+```bash
+composer require componenta/config
+```
 
-Provider не должен вычислять deployment environment при построении persistent config. `env()` создаёт `EnvironmentEntry` descriptor:
+Требования:
+
+- PHP 8.4 или новее;
+- `componenta/arrayable` для общего контракта преобразования в массив;
+- `psr/container` для `ContainerValue` и функции доступа к конфигурации
+  контейнера.
+
+## Основные понятия
+
+Провайдер конфигурации — вызываемый объект. Он возвращает либо один вклад в виде
+массива, либо итерируемую последовательность массивов. `ConfigFactory` вызывает
+каждое переданное вхождение провайдера ровно один раз, объединяет вклады по
+порядку и возвращает `ConfigComposition`:
+
+- `config` содержит только секции приложения;
+- `dependencies` содержит исходные секции описаний контейнера.
+
+`DependencyDefinitions` — объект передачи данных, а не построенный граф
+зависимостей. Он не нормализует имена классов, не запускает автозагрузку и не
+решает, можно ли создать сервис. Передавайте его в корень сборки DI и не
+публикуйте как секцию конфигурации приложения.
+
+## Быстрый старт
 
 ```php
-return [
-    'database' => [
-        'host' => env('DATABASE_HOST'),
-        'port' => env('DATABASE_PORT', '3306'),
-        'debug' => env('APP_DEBUG', 'false'),
-    ],
-];
+<?php
+
+use Componenta\Config\ConfigFactory;
+use Componenta\Config\ConfigProvider;
+use Componenta\Config\FileProvider;
+use Componenta\Config\Loader\EnvLoader;
+use function Componenta\Config\path;
+
+final class AppConfigProvider extends ConfigProvider
+{
+    protected function getConfig(): array
+    {
+        return [
+            'app' => ['name' => 'Example'],
+        ];
+    }
+
+    protected function getFactories(): array
+    {
+        return [
+            App::class => AppFactory::class,
+        ];
+    }
+}
+
+$environment = (new EnvLoader(__DIR__))->load();
+
+$composition = (new ConfigFactory())->create(
+    $environment,
+    new AppConfigProvider(),
+    new FileProvider(__DIR__ . '/config/*.{php,json}'),
+);
+
+$config = $composition->config;
+$dependencies = $composition->dependencies;
+
+echo $config->string(path('app.name'));
 ```
 
-`env()` не читает globals. Descriptor разрешается через `Config::$environment` только при чтении значения:
+Итоговый `Config` сохраняет тот же экземпляр `Environment`, который был
+передан в `ConfigFactory::create()`.
 
-```php
-$config->string(path('database.host'));
-$config->int(path('database.port'));
-$config->bool(path('database.debug'));
-```
+## Композиция провайдеров
 
-В provider и cache modes используется один и тот же runtime `Environment`; persistent cache содержит descriptor, а не build-time value. Поэтому `env()` не может заморозить build secret в cache.
+`ConfigProvider` возвращает один вклад. Полный упорядоченный список провайдеров
+готовит приложение; сами провайдеры не ищут и не вызывают вложенные провайдеры.
 
-Для прямого runtime-доступа используется сам `Environment`:
-
-```php
-$environment->string('APP_ENV');
-$environment->bool('APP_DEBUG', false);
-$environment->int('PORT', 8080);
-```
-
-`Environment::fromGlobals()` использует приоритет:
-
-```text
-process environment < $_SERVER < $_ENV
-```
-
-## ConfigEntry и LazyValue
-
-`ConfigEntry` используется для fallback на другой config key. `LazyValue` — для явного lazy evaluation. Lazy result кэшируется отдельно для каждого `Config`/`ContainerValue`, если не указан `cache: false`. Циклическое разрешение в одном runtime context завершается fail-fast.
-
-Persistent cache поддерживает anonymous source-backed closures с exportable captured values, public static methods и методы exportable readonly objects. Class scope anonymous `LazyValue` closure сохраняется только там, где его можно восстановить без изменения `self`/`static` semantics. User-defined named function отклоняется во время cache export: его definition может находиться в provider-файле, который production bootstrap уже не загружает.
-
-Обычный `Closure` как значение конфигурации cache-able только если он global-scope, unbound и в остальном экспортируем. Class-scoped/bound plain Closure отклоняется, а не сохраняется с изменённой runtime binding semantics.
-
-## Dotenv
-
-`EnvLoader` по умолчанию читает только `.env`, затем `.env.local`, и всегда возвращает effective runtime `Environment`. Deployment values имеют приоритет, пока явно не передан `override: true`. Dotenv записывается только в `$_ENV`; `$_SERVER` не изменяется. Sample/backup и остальные `.env*` файлы не подхватываются автоматически.
-
-`read()` не изменяет globals. Required variables могут приходить как из dotenv, так и из deployment environment. Ошибки парсинга никогда не включают значения из dotenv в diagnostic message.
-
-## Provider composition для DI v5
-
-`ConfigProvider` транспортирует точные dependency sections, которые потребляет DI v5. Config проверяет только structural invariants, необходимые для детерминированной композиции: известные имена sections, array/bool shapes и composable delegator pipelines. Семантическая validation/canonicalization значений внутри этих sections остаётся ответственностью DI v5.
-
-Hooks:
+Доступные методы расширения:
 
 ```text
 getFactories()
@@ -85,48 +114,186 @@ shouldReplaceAttributeDefinitions()
 getAttributeCapabilities()
 ```
 
-`getConfig()` не может определять reserved root `dependencies`. Replacement hooks имеют tri-state семантику: `true`/`false` — explicit value, `null` — provider не меняет ранее составленное значение.
+`getConfig()` возвращает секции приложения и не может определять
+зарезервированный корневой ключ `dependencies`. Методы замены используют три
+состояния: `true` и `false` задают явное значение, а `null` сохраняет ранее
+собранное значение.
 
-### Merge semantics
+### Правила слияния секций приложения
 
-В `dependencies`:
+- список со списком дописывается с сохранением порядка провайдеров;
+- ассоциативные массивы сливаются рекурсивно по точным строковым и целочисленным
+  ключам;
+- переход между списком и ассоциативным массивом заменяет прежнее значение;
+- скаляры, объекты и значения разной формы заменяются более поздним значением;
+- `ConfigOverride::replace($value)` явно заменяет поддерево;
+- `ConfigOverride::remove()` удаляет ключ.
 
-- `factories`, `aliases`, `services`, `parameter_resolvers` — identity maps;
-- numeric `invokables` append-ятся, keyed invokables сохраняют key для canonicalization в DI v5;
-- `attribute_definitions` и `attribute_capabilities` append-ятся;
-- delegator pipelines append-ятся;
-- поздний explicit replacement flag побеждает.
+Маркеры переопределения допустимы только как значения map. Списки всегда
+дописываются и отклоняют такие маркеры.
 
-За пределами dependency root append-ятся только две настоящие PHP lists. Остальные arrays являются maps: identity string/integer keys сохраняется, nested arrays с одинаковым key объединяются рекурсивно, более поздний scalar заменяет предыдущий. Unknown DI sections и malformed dependency root, array/bool sections или delegator pipelines отклоняются до merge. Чрезмерно глубокие recursive graphs завершаются fail-fast вместо stack exhaustion. Class-method callable pair должна быть вложенным pipeline item.
+PHP-ссылки в массивах и вложенность глубже 64 уровней отклоняются с
+`ConfigMergeException`.
 
-## File providers
+### Правила слияния секций зависимостей
 
-`FileProvider` поддерживает PHP и JSON. Файлы обрабатываются в отсортированном порядке. JSON integers за пределами platform int range сохраняются как точные строки. Ошибки чтения, парсинга и unsupported matched files приводят к fail-fast.
+- `factories`, `aliases`, `services` и `parameter_resolvers` объединяются
+  по ключу; более поздняя запись целиком заменяет прежнюю;
+- числовые `invokables` дописываются, а именованные заменяют тот же ключ;
+- цепочки делегаторов, описания атрибутов и возможности атрибутов дописываются
+  по порядку провайдеров;
+- побеждает последний явно переданный флаг замены.
 
-## Persistent application-config cache
+Значения приложения и секции зависимостей объединяются независимо. Наличие или
+отсутствие зарезервированного корня зависимостей не меняет list/map-форму
+приложения, а замена корня приложения не удаляет ранее собранные описания
+зависимостей.
 
-Config cache хранит только application/package configuration. Из него намеренно исключаются runtime `Environment` и reserved root `dependencies`, которым владеет DI v5 `DiCacheGenerator`.
+Config проверяет только форму, необходимую для безопасного слияния. Семантику
+фабрик, вызываемых значений, псевдонимов, типов и возможность построить сервис
+проверяет DI.
 
-`EnvironmentEntry`, созданный `env()`, сохраняется как descriptor: runtime value и secret в cache не записываются.
+## Чтение конфигурации
+
+Строка или целое число в `Config::get()` означает буквальный ключ верхнего
+уровня. `ConfigPath` выполняет вложенный поиск:
 
 ```php
-ConfigLoader::export($config, 'var/cache/config.php');
+use function Componenta\Config\path;
 
-$config = ConfigLoader::loadFromFile(
-    'var/cache/config.php',
-    Environment::fromGlobals(),
-);
+$config->get('database.host');       // буквальный ключ
+$config->get(path('database.host')); // вложенный путь
 ```
 
-DI v5 загружает собственный dependency cache и при build снова добавляет normalized dependencies в итоговый runtime `Config`. Provider/cache modes сходятся к одной runtime shape без build-time environment и без дублирования DI graph.
+Для распространённых типов есть методы:
 
-Unknown envelope keys, embedded dependency root, stale cache version и graphs глубже поддерживаемого exporter limit отклоняются. Cache-файл создаётся через temporary file, flush, syntax check и atomic rename. Ownership и permissions — политика deployment-а и следуют настройкам filesystem/umask процесса; их нужно настроить так, чтобы runtime user мог читать cache, а literal sensitive configuration была защищена.
+```php
+$config->string('name');
+$config->int('port');
+$config->float('ratio');
+$config->bool('enabled');
+$config->array('hosts');
+```
 
-## Container helpers
+Отсутствующее значение без значения по умолчанию приводит к исключению.
+Сохранённые `null`, `false`, пустая строка и пустой массив считаются
+существующими значениями. Преобразование в целое число выполняется без потери
+данных: дробные, переполненные, бесконечные и неоднозначные значения отклоняются.
 
-`ContainerValue` оборачивает PSR-11 container и использует тот же `Config` snapshot. Fallbacks поддерживают `ContainerEntry`, `ConfigEntry`, `EnvironmentEntry` и `LazyValue`. Если `Config` не передан явно, wrapped DI v5 container обязан предоставлять `Config::class`; нарушение bootstrap contract приводит к fail-fast.
+`toArray()`, итерация, `only()` и `except()` работают с сохранёнными
+секциями приложения. Они не добавляют описания зависимостей и не вычисляют весь
+граф конфигурации заранее.
 
-## Требования
+## Значения времени выполнения
 
-- PHP 8.4+
-- PSR-11 interfaces для container helpers
+Вспомогательные функции создают явные описания значений:
+
+```php
+use Componenta\Config\Config;
+use function Componenta\Config\config_entry;
+use function Componenta\Config\env;
+use function Componenta\Config\lazy;
+use function Componenta\Config\path;
+
+return [
+    'host' => env('DATABASE_HOST'),
+    'port' => env('DATABASE_PORT', '3306'),
+    'display_name' => config_entry(path('app.name')),
+    'dsn' => lazy(
+        static fn(Config $config): string =>
+            'mysql:host=' . $config->string('host'),
+    ),
+];
+```
+
+- `EnvironmentEntry` читает `Environment` того же `Config`;
+- `ConfigEntry` читает другой ключ того же `Config`;
+- `LazyValue` выполняется только при чтении;
+- обычные вызываемые значения не выполняются автоматически.
+
+Если выбранное значение является массивом, дескрипторы рекурсивно разрешаются
+во всём выбранном поддереве с сохранением ключей. Результаты дескрипторов также
+разрешаются рекурсивно. Цикл приводит к
+`ConfigResolutionException` с путём разрешения. Кешируемый `LazyValue`
+сохраняет один успешный результат для каждого контекста `Config` или
+`ContainerValue`. Исключения не кешируются. Повторный вход в том же Fiber
+считается циклом; одновременное вычисление из другого Fiber разрешено, а в кеш
+попадает первый успешно завершившийся результат.
+
+## Загрузка окружения
+
+`EnvLoader` по умолчанию читает `.env`, затем `.env.local`:
+
+```php
+use Componenta\Config\Loader\EnvLoader;
+
+$environment = (new EnvLoader(
+    paths: [__DIR__, '/etc/example'],
+    required: ['APP_ENV'],
+))->load();
+```
+
+Загрузчик не изменяет `$_ENV`, `$_SERVER` и окружение процесса. По умолчанию
+существующие значения процесса имеют приоритет. Передайте `override: true` в
+`load()`, если значения файлов должны победить в возвращаемом снимке; глобальное
+состояние всё равно останется неизменным.
+
+Загружаются только явно перечисленные имена файлов. Примеры и резервные копии не
+подхватываются автоматически. `read()` возвращает только разобранные значения
+dotenv или `null`, если файлов нет. Диагностика синтаксиса не раскрывает
+значения переменных.
+
+`Environment::fromGlobals()` создаёт независимый снимок со следующим
+приоритетом:
+
+```text
+окружение процесса < $_SERVER < $_ENV
+```
+
+## Файловые провайдеры
+
+`FileProvider` поддерживает PHP и JSON и возвращает по одному вкладу на каждый
+совпавший файл в лексикографическом порядке пути. Сам провайдер файлы не
+объединяет:
+
+```php
+$provider = new FileProvider(__DIR__ . '/config/*.{php,json}');
+
+foreach ($provider() as $contribution) {
+    // Слияние выполняет ConfigFactory.
+}
+```
+
+PHP-файлы подключаются в изолированной статической области и должны вернуть
+массив. Корнем JSON должен быть объект или массив; целые числа за пределами
+диапазона платформы сохраняются строками. Для нового формата реализуйте
+`FileReaderInterface`.
+
+## Работа с контейнером
+
+`ContainerValue` оборачивает контейнер PSR-11 и хранит тот же `Config`. Оба
+объекта обязательны в конструкторе и сохраняются по identity: `ContainerValue`
+не ищет, не перестраивает и не клонирует Config.
+Значения по умолчанию поддерживают `ContainerEntry`, `ConfigEntry`,
+`EnvironmentEntry` и `LazyValue`.
+
+## Исключения
+
+Все ожидаемые ошибки пакета реализуют `ConfigExceptionInterface`. Основные
+типы:
+
+- `InvalidConfigArgumentException` — неверные публичные аргументы;
+- `ConfigMergeException` — небезопасная или некорректная композиция;
+- `ConfigResolutionException` — циклы при разрешении значений;
+- `InvalidConfigValueException` и `InvalidContainerValueException` —
+  нарушение ожидаемого типа;
+- `EnvLoaderException` — ошибки dotenv;
+- `ConfigException` — отсутствующая конфигурация и ошибки чтения файлов.
+
+Исключения провайдеров проходят без изменений. Ошибка, обёрнутая файловым
+ридером, сохраняет исходное исключение в `getPrevious()`.
+
+## Связанный пакет
+
+[`componenta/di`](../di/README.ru.md) принимает `DependencyDefinitions`,
+проверяет их семантику и строит контейнер приложения.

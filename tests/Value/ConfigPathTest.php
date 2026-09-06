@@ -2,13 +2,20 @@
 
 declare(strict_types=1);
 
+namespace Componenta\Config\Tests\Value;
+
 use Componenta\Config\ConfigPath;
+use Componenta\Config\Exception\InvalidConfigArgumentException;
 
 it('splits valid dot paths into stable segments', function (
     string $input,
     array $segments,
     bool $nested,
 ): void {
+    if ($segments === []) {
+        throw new \LogicException('A valid ConfigPath dataset must contain at least one segment.');
+    }
+
     $path = new ConfigPath($input);
 
     expect($path->toArray())->toBe($segments)
@@ -23,7 +30,7 @@ it('splits valid dot paths into stable segments', function (
 ]);
 
 it('rejects empty paths and empty path segments', function (string $path): void {
-    expect(fn() => new ConfigPath($path))->toThrow(InvalidArgumentException::class);
+    expect(fn() => new ConfigPath($path))->toThrow(InvalidConfigArgumentException::class);
 })->with([
     'empty path' => '',
     'leading empty segment' => '.database',

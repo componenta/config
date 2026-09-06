@@ -2,8 +2,11 @@
 
 declare(strict_types=1);
 
+namespace Componenta\Config\Tests\Loader;
+
 use Componenta\Config\Exception\EnvLoaderException;
 use Componenta\Config\Loader\EnvLoader;
+use RuntimeException;
 
 it('does not load sample or backup dotenv files unless explicitly requested', function (): void {
     $root = sys_get_temp_dir() . '/componenta_env_security_' . bin2hex(random_bytes(5));
@@ -38,7 +41,7 @@ it('never includes dotenv values in parse diagnostics', function (): void {
             throw new RuntimeException('Expected dotenv parse failure.');
         } catch (EnvLoaderException $e) {
             expect($e->getMessage())->toContain('invalid variable name')
-                ->not->toContain($secret);
+                ->and(str_contains($e->getMessage(), $secret))->toBeFalse();
         }
     } finally {
         @unlink($root . '/.env');

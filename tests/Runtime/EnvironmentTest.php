@@ -2,9 +2,12 @@
 
 declare(strict_types=1);
 
+namespace Componenta\Config\Tests\Runtime;
+
 use Componenta\Config\ConfigPath;
 use Componenta\Config\Environment;
 use Componenta\Config\Exception\ConfigException;
+use Componenta\Config\Exception\InvalidConfigArgumentException;
 use Componenta\Config\Exception\InvalidConfigValueException;
 
 it('reads literal and ConfigPath environment names', function (): void {
@@ -19,9 +22,9 @@ it('reads literal and ConfigPath environment names', function (): void {
 
 it('rejects invalid environment snapshot keys', function (): void {
     expect(fn() => new Environment([0 => 'value']))
-        ->toThrow(InvalidArgumentException::class, 'non-empty strings')
+        ->toThrow(InvalidConfigArgumentException::class, 'non-empty strings')
         ->and(fn() => new Environment(['' => 'value']))
-        ->toThrow(InvalidArgumentException::class, 'non-empty strings');
+        ->toThrow(InvalidConfigArgumentException::class, 'non-empty strings');
 });
 
 it('supports defaults and required lookup', function (): void {

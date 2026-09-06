@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Componenta\Config;
 
 use Componenta\Arrayable\Arrayable;
-use InvalidArgumentException;
+use Componenta\Config\Exception\InvalidConfigArgumentException;
 
 /**
  * Value object representing a non-empty configuration path with dot notation.
@@ -22,13 +22,13 @@ final readonly class ConfigPath implements \Stringable, Arrayable
         public string $value,
     ) {
         if ($value === '') {
-            throw new InvalidArgumentException('Config path must not be empty.');
+            throw new InvalidConfigArgumentException('Config path must not be empty.');
         }
 
         $segments = explode('.', $value);
         foreach ($segments as $segment) {
             if ($segment === '') {
-                throw new InvalidArgumentException(
+                throw new InvalidConfigArgumentException(
                     'Config path segments must not be empty.',
                 );
             }

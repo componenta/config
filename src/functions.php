@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Componenta\Config;
 
 use Componenta\Config\Exception\ConfigException;
-use Componenta\Config\Internal\ConfigMerger;
 use Psr\Container\ContainerInterface;
 
 function path(string $path): ConfigPath
@@ -52,14 +51,4 @@ function config(ContainerInterface $container): Config
     }
 
     return $config;
-}
-
-/**
- * @param array<array-key, mixed> $base
- * @param array<array-key, mixed> $override
- * @return array<array-key, mixed>
- */
-function config_merge(array $base, array $override): array
-{
-    return ConfigMerger::merge($base, $override);
 }

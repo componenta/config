@@ -5,13 +5,15 @@ declare(strict_types=1);
 namespace Componenta\Config\Internal;
 
 use Componenta\Config\ConfigKey;
-use InvalidArgumentException;
+use Componenta\Config\ConfigOverride;
+use Componenta\Config\Exception\ConfigMergeException;
+use ReflectionReference;
 
 /**
  * Deterministic configuration composition.
  *
  * Generic lists append while maps preserve both string and integer key identity.
- * The DI v5 dependency root uses section-specific merge rules so composition
+ * The reserved dependency root uses section-specific merge rules so composition
  * cannot change the meaning of a valid dependency shape.
  *
  * @internal
@@ -59,10 +61,57 @@ final class ConfigMerger
      */
     public static function merge(array $base, array $override): array
     {
+        self::assertNoReferences($base);
+        self::assertNoReferences($override);
         self::assertMergeableDependencies($base);
         self::assertMergeableDependencies($override);
 
-        return self::mergeArray($base, $override, root: true);
+        $baseHasDependencies = array_key_exists(ConfigKey::DEPENDENCIES, $base);
+        $overrideHasDependencies = array_key_exists(ConfigKey::DEPENDENCIES, $override);
+
+        /** @var array<array-key, mixed> $baseDependencies */
+        $baseDependencies = $baseHasDependencies
+            ? $base[ConfigKey::DEPENDENCIES]
+            : [];
+        /** @var array<array-key, mixed> $overrideDependencies */
+        $overrideDependencies = $overrideHasDependencies
+            ? $override[ConfigKey::DEPENDENCIES]
+            : [];
+
+        unset($base[ConfigKey::DEPENDENCIES], $override[ConfigKey::DEPENDENCIES]);
+
+        $merged = self::mergeApplication($base, $override);
+
+        if ($baseHasDependencies || $overrideHasDependencies) {
+            $merged[ConfigKey::DEPENDENCIES] = match (true) {
+                $baseHasDependencies && $overrideHasDependencies => self::mergeDependencies(
+                    $baseDependencies,
+                    $overrideDependencies,
+                    depth: 1,
+                ),
+                $overrideHasDependencies => $overrideDependencies,
+                default => $baseDependencies,
+            };
+        }
+
+        return $merged;
+    }
+
+    /**
+     * @param array<array-key, mixed> $base
+     * @param array<array-key, mixed> $override
+     * @return array<array-key, mixed>
+     */
+    private static function mergeApplication(array $base, array $override): array
+    {
+        if ($base !== []
+            && $override !== []
+            && array_is_list($base) !== array_is_list($override)
+        ) {
+            return self::mergeArray([], $override);
+        }
+
+        return self::mergeArray($base, $override);
     }
 
     /**
@@ -73,30 +122,57 @@ final class ConfigMerger
     private static function mergeArray(
         array $base,
         array $override,
-        bool $root = false,
         int $depth = 0,
     ): array {
         self::assertDepth($depth);
 
-        if ($base === []) {
-            return $override;
-        }
         if ($override === []) {
             return $base;
         }
 
         if (array_is_list($base) && array_is_list($override)) {
+            foreach ($override as $value) {
+                if ($value instanceof ConfigOverride) {
+                    throw new ConfigMergeException(
+                        'ConfigOverride can only be used as a map value; lists are append-only.',
+                    );
+                }
+            }
+
             return [...$base, ...$override];
         }
 
         foreach ($override as $key => $value) {
+            if ($value instanceof ConfigOverride) {
+                if ($value->removesKey()) {
+                    unset($base[$key]);
+                    continue;
+                }
+
+                $replacement = $value->replacement();
+                $base[$key] = is_array($replacement)
+                    ? self::mergeArray([], $replacement, depth: $depth + 1)
+                    : $replacement;
+                continue;
+            }
+
+            if (!array_key_exists($key, $base)) {
+                $base[$key] = is_array($value)
+                    ? self::mergeArray([], $value, depth: $depth + 1)
+                    : $value;
+                continue;
+            }
+
             if (array_key_exists($key, $base)
                 && is_array($base[$key])
                 && is_array($value)
             ) {
-                $base[$key] = $root && $key === ConfigKey::DEPENDENCIES
-                    ? self::mergeDependencies($base[$key], $value, $depth + 1)
-                    : self::mergeArray($base[$key], $value, depth: $depth + 1);
+                if (array_is_list($base[$key]) !== array_is_list($value)) {
+                    $base[$key] = $value;
+                    continue;
+                }
+
+                $base[$key] = self::mergeArray($base[$key], $value, depth: $depth + 1);
                 continue;
             }
 
@@ -213,7 +289,7 @@ final class ConfigMerger
 
         $dependencies = $config[ConfigKey::DEPENDENCIES];
         if (!is_array($dependencies)) {
-            throw new InvalidArgumentException(sprintf(
+            throw new ConfigMergeException(sprintf(
                 'Dependency root "%s" must be an array; got %s.',
                 ConfigKey::DEPENDENCIES,
                 get_debug_type($dependencies),
@@ -224,14 +300,14 @@ final class ConfigMerger
 
         foreach ($dependencies as $key => $value) {
             if (!is_string($key) || !isset($allowed[$key])) {
-                throw new InvalidArgumentException(sprintf(
-                    'Unsupported DI v5 dependency section "%s".',
+                throw new ConfigMergeException(sprintf(
+                    'Unsupported dependency section "%s".',
                     (string) $key,
                 ));
             }
 
             if (isset(self::ARRAY_DEPENDENCY_SECTIONS[$key]) && !is_array($value)) {
-                throw new InvalidArgumentException(sprintf(
+                throw new ConfigMergeException(sprintf(
                     'Dependency section "%s" must be an array; got %s.',
                     $key,
                     get_debug_type($value),
@@ -239,7 +315,7 @@ final class ConfigMerger
             }
 
             if (isset(self::BOOL_DEPENDENCY_SECTIONS[$key]) && !is_bool($value)) {
-                throw new InvalidArgumentException(sprintf(
+                throw new ConfigMergeException(sprintf(
                     'Dependency section "%s" must be bool; got %s.',
                     $key,
                     get_debug_type($value),
@@ -251,7 +327,7 @@ final class ConfigMerger
                 && $value !== []
                 && !array_is_list($value)
             ) {
-                throw new InvalidArgumentException(sprintf(
+                throw new ConfigMergeException(sprintf(
                     'Dependency section "%s" must be a list.',
                     $key,
                 ));
@@ -267,21 +343,14 @@ final class ConfigMerger
 
         foreach ($delegators as $id => $pipeline) {
             if (!is_string($id) || $id === '') {
-                throw new InvalidArgumentException(
+                throw new ConfigMergeException(
                     'Delegator service ids must be non-empty strings.',
                 );
             }
 
             if (!is_array($pipeline) || !array_is_list($pipeline)) {
-                throw new InvalidArgumentException(sprintf(
+                throw new ConfigMergeException(sprintf(
                     'Delegators for "%s" must be configured as a pipeline list.',
-                    $id,
-                ));
-            }
-
-            if (self::isCallablePair($pipeline)) {
-                throw new InvalidArgumentException(sprintf(
-                    'Delegators for "%s" must be configured as a pipeline list; callable pairs must be nested as one pipeline entry.',
                     $id,
                 ));
             }
@@ -291,7 +360,7 @@ final class ConfigMerger
     private static function assertDepth(int $depth): void
     {
         if ($depth > self::MAX_DEPTH) {
-            throw new InvalidArgumentException(sprintf(
+            throw new ConfigMergeException(sprintf(
                 'Configuration merge exceeds maximum nesting depth of %d.',
                 self::MAX_DEPTH,
             ));
@@ -300,25 +369,55 @@ final class ConfigMerger
 
     /**
      * @param array<array-key, mixed> $value
-     * @phpstan-assert-if-true array{object|string, non-empty-string} $value
+     * @param list<int|string> $path
      */
-    private static function isCallablePair(array $value): bool
+    private static function assertNoReferences(
+        array $value,
+        array $path = [],
+        int $depth = 0,
+    ): void {
+        self::assertDepth($depth);
+
+        foreach ($value as $key => $item) {
+            $itemPath = [...$path, $key];
+
+            if (ReflectionReference::fromArrayElement($value, $key) !== null) {
+                throw new ConfigMergeException(sprintf(
+                    'Configuration contains a PHP reference at %s.',
+                    self::formatPath($itemPath),
+                ));
+            }
+
+            if (is_array($item)) {
+                self::assertNoReferences($item, $itemPath, $depth + 1);
+                continue;
+            }
+
+            if ($item instanceof ConfigOverride
+                && !$item->removesKey()
+                && is_array($item->replacement())
+            ) {
+                self::assertNoReferences(
+                    $item->replacement(),
+                    $itemPath,
+                    $depth + 1,
+                );
+            }
+        }
+    }
+
+    /** @param list<int|string> $path */
+    private static function formatPath(array $path): string
     {
-        if (array_keys($value) !== [0, 1]
-            || !is_string($value[1])
-            || $value[1] === ''
-        ) {
-            return false;
+        $result = '$config';
+
+        foreach ($path as $segment) {
+            $result .= is_int($segment)
+                ? sprintf('[%d]', $segment)
+                : sprintf('[%s]', var_export($segment, true));
         }
 
-        if (is_callable($value)) {
-            return true;
-        }
-
-        return is_string($value[0])
-            && $value[0] !== ''
-            && (class_exists($value[0]) || interface_exists($value[0]))
-            && method_exists($value[0], $value[1]);
+        return $result;
     }
 
     private function __construct() {}

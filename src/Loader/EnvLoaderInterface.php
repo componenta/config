@@ -9,8 +9,8 @@ use Componenta\Config\Environment;
 interface EnvLoaderInterface
 {
     /**
-     * Load configured dotenv files into $_ENV and return the effective runtime
-     * environment snapshot. Existing runtime values win unless overridden.
+     * Return an immutable snapshot composed from process values and configured
+     * dotenv files without mutating process globals.
      */
     public function load(bool $override = false): Environment;
 }

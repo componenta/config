@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+namespace Componenta\Config\Tests\Contract;
+
 use Componenta\Config\ConfigKey;
 
 final class PackageConfigKeyFixture extends ConfigKey

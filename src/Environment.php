@@ -6,9 +6,9 @@ namespace Componenta\Config;
 
 use Componenta\Arrayable\Arrayable;
 use Componenta\Config\Exception\ConfigException;
+use Componenta\Config\Exception\InvalidConfigArgumentException;
 use Componenta\Config\Exception\InvalidConfigValueException;
 use Componenta\Config\Internal\TypeConverter;
-use InvalidArgumentException;
 
 /**
  * Immutable snapshot of environment values.
@@ -28,7 +28,7 @@ final readonly class Environment implements \Countable, \IteratorAggregate, Arra
     {
         foreach ($data as $key => $_value) {
             if (!is_string($key) || $key === '') {
-                throw new InvalidArgumentException(
+                throw new InvalidConfigArgumentException(
                     'Environment keys must be non-empty strings.',
                 );
             }

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Componenta\Config;
 
-use InvalidArgumentException;
+use Componenta\Config\Exception\InvalidConfigArgumentException;
 
 /** Runtime-bound reference to a value in Config::$environment. */
 final readonly class EnvironmentEntry
@@ -13,8 +13,8 @@ final readonly class EnvironmentEntry
         public string|ConfigPath $key,
         public mixed $default = DefaultValue::None,
     ) {
-        if (is_string($key) && $key === '') {
-            throw new InvalidArgumentException('Environment entry key must not be empty.');
+        if ($key === '') {
+            throw new InvalidConfigArgumentException('Environment entry key must not be empty.');
         }
     }
 

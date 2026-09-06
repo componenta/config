@@ -6,9 +6,14 @@ namespace Componenta\Config;
 
 use Componenta\Arrayable\Arrayable;
 use Componenta\Config\Exception\ConfigException;
+use Componenta\Config\Exception\ConfigResolutionException;
+use Componenta\Config\Exception\InvalidConfigArgumentException;
 use Componenta\Config\Exception\InvalidConfigValueException;
 use Componenta\Config\Internal\TypeConverter;
-use InvalidArgumentException;
+use Fiber;
+use ReflectionReference;
+use stdClass;
+use WeakMap;
 
 /**
  * Immutable runtime configuration snapshot.
@@ -18,32 +23,48 @@ use InvalidArgumentException;
  * runtime environment snapshot associated with this configuration.
  *
  * @implements \IteratorAggregate<array-key, mixed>
- * @implements \ArrayAccess<array-key, mixed>
+ * @implements \ArrayAccess<mixed, mixed>
  */
 final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arrayable
 {
+    private const int MAX_RESOLUTION_DEPTH = 64;
+
+    private readonly object $mainResolutionContext;
+
+    /** @var WeakMap<object, list<array{key: string, label: string}>>|null */
+    private ?WeakMap $resolutionStacks = null;
+
     /** @param array<array-key, mixed> $data */
     public function __construct(
         public readonly array $data,
-        public readonly Environment $environment = new Environment([]),
-    ) {}
+        public readonly Environment $environment,
+    ) {
+        $this->mainResolutionContext = new stdClass();
+    }
 
     public function get(
         int|string|ConfigPath $key,
         mixed $default = DefaultValue::None,
     ): mixed {
-        $found = false;
-        $value = $this->resolveKey($key, $found);
+        $context = Fiber::getCurrent() ?? $this->mainResolutionContext;
+        $this->beginResolution($context, $key);
 
-        if ($found) {
-            return $this->resolveValue($value);
+        try {
+            $found = false;
+            $value = $this->resolveKey($key, $found);
+
+            if ($found) {
+                return $this->resolveValue($value, [(string) $key]);
+            }
+
+            if ($default === DefaultValue::None) {
+                throw ConfigException::missingKey((string) $key);
+            }
+
+            return $this->resolveDefault($default);
+        } finally {
+            $this->endResolution($context);
         }
-
-        if ($default === DefaultValue::None) {
-            throw ConfigException::missingKey((string) $key);
-        }
-
-        return $this->resolveDefault($default);
     }
 
     public function has(int|string|ConfigPath $key): bool
@@ -199,24 +220,124 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
 
     private function resolveDefault(mixed $default): mixed
     {
-        if ($default instanceof ConfigEntry) {
-            return $default->resolve($this);
-        }
-
-        return $this->resolveValue($default);
+        return $this->resolveValue($default, ['default']);
     }
 
-    private function resolveValue(mixed $value): mixed
+    /** @param non-empty-list<string> $path */
+    private function resolveValue(mixed $value, array $path): mixed
     {
-        if ($value instanceof EnvironmentEntry) {
-            return $value->resolve($this->environment);
-        }
+        return $this->resolveValueRecursive($value, $path);
+    }
 
-        if ($value instanceof LazyValue) {
-            return $value->resolve($this);
-        }
+    /**
+     * @param non-empty-list<string> $path
+     * @param array<int, array{position: int, descriptor: object}> $positions
+     * @param list<string> $labels
+     * @param array<string, true> $arrayReferences
+     */
+    private function resolveValueRecursive(
+        mixed $value,
+        array $path,
+        array $positions = [],
+        array $labels = [],
+        array $arrayReferences = [],
+        int $depth = 0,
+    ): mixed {
+        while (true) {
+            if ($value instanceof EnvironmentEntry
+                || $value instanceof ConfigEntry
+                || $value instanceof LazyValue
+            ) {
+                if ($depth >= self::MAX_RESOLUTION_DEPTH) {
+                    throw ConfigResolutionException::maximumDepth(
+                        $path,
+                        self::MAX_RESOLUTION_DEPTH,
+                    );
+                }
 
-        return $value;
+                ++$depth;
+                $identity = spl_object_id($value);
+                $label = match (true) {
+                    $value instanceof EnvironmentEntry => 'EnvironmentEntry',
+                    $value instanceof ConfigEntry => 'ConfigEntry',
+                    default => 'LazyValue',
+                };
+
+                if (array_key_exists($identity, $positions)
+                    && $positions[$identity]['descriptor'] === $value
+                ) {
+                    $path = array_slice(
+                        $labels,
+                        $positions[$identity]['position'],
+                    );
+                    $path[] = $label;
+
+                    /** @var non-empty-list<string> $path */
+                    throw ConfigResolutionException::descriptorCycle($path);
+                }
+
+                $positions[$identity] = [
+                    'position' => count($labels),
+                    'descriptor' => $value,
+                ];
+                $labels[] = $label;
+            }
+
+            if ($value instanceof EnvironmentEntry) {
+                $value = $value->resolve($this->environment);
+                continue;
+            }
+
+            if ($value instanceof ConfigEntry) {
+                $value = $value->resolve($this);
+                continue;
+            }
+
+            if ($value instanceof LazyValue) {
+                $value = $value->resolve($this);
+                continue;
+            }
+
+            if (is_array($value)) {
+                if ($depth >= self::MAX_RESOLUTION_DEPTH) {
+                    throw ConfigResolutionException::maximumDepth(
+                        $path,
+                        self::MAX_RESOLUTION_DEPTH,
+                    );
+                }
+
+                $resolved = [];
+
+                foreach ($value as $key => $item) {
+                    $itemPath = [...$path, (string) $key];
+                    $childReferences = $arrayReferences;
+                    $reference = ReflectionReference::fromArrayElement($value, $key);
+
+                    if ($reference !== null) {
+                        $referenceId = $reference->getId();
+
+                        if (isset($arrayReferences[$referenceId])) {
+                            throw ConfigResolutionException::arrayCycle($itemPath);
+                        }
+
+                        $childReferences[$referenceId] = true;
+                    }
+
+                    $resolved[$key] = $this->resolveValueRecursive(
+                        $item,
+                        $itemPath,
+                        $positions,
+                        $labels,
+                        $childReferences,
+                        $depth + 1,
+                    );
+                }
+
+                return $resolved;
+            }
+
+            return $value;
+        }
     }
 
     private function resolveKey(int|string|ConfigPath $key, bool &$found): mixed
@@ -309,10 +430,53 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
             return $offset;
         }
 
-        throw new InvalidArgumentException(sprintf(
+        throw new InvalidConfigArgumentException(sprintf(
             'Config offset must be int, string or %s; got %s.',
             ConfigPath::class,
             get_debug_type($offset),
         ));
+    }
+
+    private function beginResolution(object $context, int|string|ConfigPath $key): void
+    {
+        $stacks = $this->resolutionStacks ??= new WeakMap();
+        $stack = $stacks[$context] ?? [];
+        $identity = $key instanceof ConfigPath
+            ? 'path:' . $key->value
+            : get_debug_type($key) . ':' . (string) $key;
+        $label = (string) $key;
+
+        foreach ($stack as $index => $entry) {
+            if ($entry['key'] !== $identity) {
+                continue;
+            }
+
+            $path = array_column(array_slice($stack, $index), 'label');
+            $path[] = $label;
+
+            /** @var non-empty-list<string> $path */
+            throw ConfigResolutionException::cycle($path);
+        }
+
+        $stack[] = ['key' => $identity, 'label' => $label];
+        $stacks[$context] = $stack;
+    }
+
+    private function endResolution(object $context): void
+    {
+        $stacks = $this->resolutionStacks;
+        if ($stacks === null || !isset($stacks[$context])) {
+            return;
+        }
+
+        $stack = $stacks[$context];
+        array_pop($stack);
+
+        if ($stack === []) {
+            unset($stacks[$context]);
+            return;
+        }
+
+        $stacks[$context] = $stack;
     }
 }

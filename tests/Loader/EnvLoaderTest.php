@@ -2,14 +2,16 @@
 
 declare(strict_types=1);
 
+namespace Componenta\Config\Tests\Loader;
+
 use Componenta\Config\Environment;
 use Componenta\Config\Exception\EnvLoaderException;
+use Componenta\Config\Exception\InvalidConfigArgumentException;
 use Componenta\Config\Loader\EnvLoader;
 
 function envLoaderRuntime(): string
 {
-    static $root;
-    return $root ??= sys_get_temp_dir() . '/componenta_env_loader_' . bin2hex(random_bytes(5));
+    return sys_get_temp_dir() . '/componenta_env_loader_' . getmypid();
 }
 
 function clearEnvLoaderKeys(): void
@@ -23,18 +25,22 @@ function clearEnvLoaderKeys(): void
 beforeEach(function (): void {
     clearEnvLoaderKeys();
     @mkdir(envLoaderRuntime(), 0700, true);
-    foreach (glob(envLoaderRuntime() . '/.*') ?: [] as $file) {
-        if (is_file($file)) {
-            unlink($file);
+    foreach ([envLoaderRuntime() . '/*', envLoaderRuntime() . '/.*'] as $pattern) {
+        foreach (glob($pattern) ?: [] as $file) {
+            if (is_file($file)) {
+                unlink($file);
+            }
         }
     }
 });
 
 afterEach(function (): void {
     clearEnvLoaderKeys();
-    foreach (glob(envLoaderRuntime() . '/.*') ?: [] as $file) {
-        if (is_file($file)) {
-            unlink($file);
+    foreach ([envLoaderRuntime() . '/*', envLoaderRuntime() . '/.*'] as $pattern) {
+        foreach (glob($pattern) ?: [] as $file) {
+            if (is_file($file)) {
+                unlink($file);
+            }
         }
     }
     @rmdir(envLoaderRuntime());
@@ -66,10 +72,14 @@ it('keeps deployment environment precedence unless override is requested', funct
     $normal = (new EnvLoader(envLoaderRuntime()))->load();
 
     expect($normal->string('APP_ENV'))->toBe('process')
-        ->and($normal->string('FILE_ONLY'))->toBe('file');
+        ->and($normal->string('FILE_ONLY'))->toBe('file')
+        ->and($_ENV['APP_ENV'])->toBe('process')
+        ->and($_ENV)->not->toHaveKey('FILE_ONLY');
 
     $overridden = (new EnvLoader(envLoaderRuntime()))->load(override: true);
-    expect($overridden->string('APP_ENV'))->toBe('file');
+    expect($overridden->string('APP_ENV'))->toBe('file')
+        ->and($_ENV['APP_ENV'])->toBe('process')
+        ->and($_ENV)->not->toHaveKey('FILE_ONLY');
 });
 
 it('does not let unsupported server values mask valid dotenv values', function (): void {
@@ -78,17 +88,18 @@ it('does not let unsupported server values mask valid dotenv values', function (
 
     $environment = (new EnvLoader(envLoaderRuntime()))->load();
 
-    expect($_ENV['INVALID_SERVER'])->toBe('file')
+    expect($_ENV)->not->toHaveKey('INVALID_SERVER')
         ->and($environment->string('INVALID_SERVER'))->toBe('file');
 });
 
-it('loads dotenv values into env without mirroring them into server globals', function (): void {
+it('returns dotenv values without mutating any process globals', function (): void {
     file_put_contents(envLoaderRuntime() . '/.env', "FILE_ONLY=file\n");
 
     $environment = (new EnvLoader(envLoaderRuntime()))->load();
 
-    expect($_ENV['FILE_ONLY'])->toBe('file')
+    expect($_ENV)->not->toHaveKey('FILE_ONLY')
         ->and($_SERVER)->not->toHaveKey('FILE_ONLY')
+        ->and(getenv('FILE_ONLY'))->toBeFalse()
         ->and($environment->string('FILE_ONLY'))->toBe('file');
 });
 
@@ -135,7 +146,7 @@ it('allows required values to come from deployment environment', function (): vo
 
 it('rejects unsafe filenames and invalid required names', function (): void {
     expect(fn() => new EnvLoader(envLoaderRuntime(), filenames: ['../.env']))
-        ->toThrow(InvalidArgumentException::class)
+        ->toThrow(InvalidConfigArgumentException::class)
         ->and(fn() => new EnvLoader(envLoaderRuntime(), required: ['BAD-NAME']))
-        ->toThrow(InvalidArgumentException::class);
+        ->toThrow(InvalidConfigArgumentException::class);
 });

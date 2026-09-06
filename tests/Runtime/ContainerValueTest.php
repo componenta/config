@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+namespace Componenta\Config\Tests\Runtime;
+
 use Componenta\Config\Config;
 use Componenta\Config\ConfigEntry;
 use Componenta\Config\ConfigPath;
@@ -9,10 +11,14 @@ use Componenta\Config\ContainerEntry;
 use Componenta\Config\ContainerValue;
 use Componenta\Config\Environment;
 use Componenta\Config\EnvironmentEntry;
-use Componenta\Config\Exception\ConfigException;
+use Componenta\Config\Exception\InvalidConfigArgumentException;
 use Componenta\Config\Exception\InvalidContainerValueException;
 use Componenta\Config\LazyValue;
+use DateTimeImmutable;
+use DateTimeInterface;
 use Psr\Container\ContainerInterface;
+use RuntimeException;
+use stdClass;
 
 final class ContainerValueTestContainer implements ContainerInterface
 {
@@ -39,7 +45,7 @@ function containerValue(array $entries = [], ?Config $config = null): ContainerV
 {
     return new ContainerValue(
         new ContainerValueTestContainer($entries),
-        $config ?? new Config([]),
+        $config ?? new Config([], new Environment([])),
     );
 }
 
@@ -86,13 +92,26 @@ it('uses a container entry fallback type to validate an existing entry', functio
 
 it('rejects empty container entry identifiers and types', function (): void {
     expect(fn() => new ContainerEntry(''))
-        ->toThrow(InvalidArgumentException::class, 'id must not be empty')
+        ->toThrow(InvalidConfigArgumentException::class, 'id must not be empty')
         ->and(fn() => new ContainerEntry('service', ''))
-        ->toThrow(InvalidArgumentException::class, 'type must not be empty');
+        ->toThrow(InvalidConfigArgumentException::class, 'type must not be empty');
+});
+
+it('rejects container entry types that do not name a loadable object type', function (): void {
+    expect(fn() => new ContainerEntry(
+        'service',
+        'Componenta\\Config\\Tests\\MissingContainerEntryType',
+    ))->toThrow(
+        InvalidConfigArgumentException::class,
+        'must name an existing class, interface, or enum',
+    );
 });
 
 it('resolves a config entry fallback against the same config snapshot', function (): void {
-    $config = new Config(['app' => ['name' => 'Componenta']]);
+    $config = new Config(
+        ['app' => ['name' => 'Componenta']],
+        new Environment([]),
+    );
     $container = containerValue(config: $config);
 
     expect($container->find('app.name', new ConfigEntry(new ConfigPath('app.name'))))
@@ -136,16 +155,14 @@ it('delegates existence checks to the wrapped container', function (): void {
         ->and($container->has('missing'))->toBeFalse();
 });
 
-it('resolves config from a DI-style wrapped container', function (): void {
-    $config = new Config(['app' => ['name' => 'Componenta']]);
-    $container = new ContainerValue(new ContainerValueTestContainer([
-        Config::class => $config,
-    ]));
+it('retains the supplied container and config by identity', function (): void {
+    $config = new Config(
+        ['app' => ['name' => 'Componenta']],
+        new Environment([]),
+    );
+    $wrapped = new ContainerValueTestContainer([]);
+    $container = new ContainerValue($wrapped, $config);
 
-    expect($container->config)->toBe($config);
-});
-
-it('fails fast when neither the wrapped container nor the constructor provides config', function (): void {
-    expect(fn() => new ContainerValue(new ContainerValueTestContainer([])))
-        ->toThrow(ConfigException::class, 'must expose');
+    expect($container->container)->toBe($wrapped)
+        ->and($container->config)->toBe($config);
 });

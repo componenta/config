@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Componenta\Config;
 
-use InvalidArgumentException;
+use Componenta\Config\Exception\InvalidConfigArgumentException;
 
 /**
- * Base provider for the dependency schema consumed by Componenta DI v5.
+ * Base provider for the dependency schema consumed by Componenta DI.
  *
- * Config enforces only composition-safe shapes. DI v5 remains the sole owner
+ * Config enforces only composition-safe shapes. DI remains the sole owner
  * of semantic validation and canonicalization of container definitions.
  */
 class ConfigProvider
@@ -20,50 +20,16 @@ class ConfigProvider
         $application = $this->getConfig();
 
         if (array_key_exists(ConfigKey::DEPENDENCIES, $application)) {
-            throw new InvalidArgumentException(sprintf(
+            throw new InvalidConfigArgumentException(sprintf(
                 'Application configuration must not define reserved root key "%s".',
                 ConfigKey::DEPENDENCIES,
             ));
         }
 
-        $config = config_merge(
+        return array_replace(
             [ConfigKey::DEPENDENCIES => $this->getDependencies()],
             $application,
         );
-
-        foreach ($this->getProviders() as $provider) {
-            if (!is_callable($provider)) {
-                throw new InvalidArgumentException(sprintf(
-                    'Configuration provider must be callable; got %s.',
-                    get_debug_type($provider),
-                ));
-            }
-
-            $child = $provider();
-
-            if (!is_array($child)) {
-                if (!is_iterable($child)) {
-                    throw new InvalidArgumentException(sprintf(
-                        'Child configuration provider must return an array or iterable; got %s.',
-                        get_debug_type($child),
-                    ));
-                }
-
-                $child = iterator_to_array($child);
-            }
-
-            if ($child !== []) {
-                $config = config_merge($config, $child);
-            }
-        }
-
-        return $config;
-    }
-
-    /** @return iterable<mixed> */
-    protected function getProviders(): iterable
-    {
-        return [];
     }
 
     /** @return array<array-key, mixed> */

@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+namespace Componenta\Config\Tests\Contract;
+
 use Componenta\Config\Config;
 use Componenta\Config\ConfigEntry;
 use Componenta\Config\ConfigPath;
@@ -9,12 +11,13 @@ use Componenta\Config\ContainerEntry;
 use Componenta\Config\Environment;
 use Componenta\Config\EnvironmentEntry;
 use Componenta\Config\Exception\ConfigException;
+use Componenta\Config\Exception\InvalidConfigArgumentException;
 use Componenta\Config\LazyValue;
 use Psr\Container\ContainerInterface;
+use stdClass;
 
 use function Componenta\Config\config;
 use function Componenta\Config\config_entry;
-use function Componenta\Config\config_merge;
 use function Componenta\Config\entry;
 use function Componenta\Config\env;
 use function Componenta\Config\lazy;
@@ -31,7 +34,7 @@ it('creates helper value objects including runtime environment references', func
 });
 
 it('resolves Config from a PSR container and validates its type', function (): void {
-    $expected = new Config(['app' => 'test']);
+    $expected = new Config(['app' => 'test'], new Environment([]));
     $container = new class ($expected) implements ContainerInterface {
         public function __construct(private readonly mixed $value) {}
 
@@ -97,15 +100,5 @@ it('fails when a required runtime environment entry is missing', function (): vo
     $config = new Config(['required' => env('REQUIRED_ENV')], new Environment([]));
 
     expect(fn() => $config->get('required'))->toThrow(ConfigException::class, 'REQUIRED_ENV')
-        ->and(fn() => env(''))->toThrow(InvalidArgumentException::class);
-});
-
-it('merges generic configuration recursively and appends lists', function (): void {
-    expect(config_merge(
-        ['middleware' => ['auth'], 'database' => ['host' => 'localhost']],
-        ['middleware' => ['csrf'], 'database' => ['port' => 3306]],
-    ))->toBe([
-        'middleware' => ['auth', 'csrf'],
-        'database' => ['host' => 'localhost', 'port' => 3306],
-    ]);
+        ->and(fn() => env(''))->toThrow(InvalidConfigArgumentException::class);
 });

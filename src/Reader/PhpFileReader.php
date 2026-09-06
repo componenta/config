@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Componenta\Config\Reader;
 
 use Componenta\Config\Exception\ConfigException;
+use ReflectionFunction;
 use Throwable;
 
 final class PhpFileReader implements FileReaderInterface
@@ -24,7 +25,9 @@ final class PhpFileReader implements FileReaderInterface
         }
 
         try {
-            $data = include $file;
+            $data = (new ReflectionFunction(
+                static fn(): mixed => include func_get_arg(0),
+            ))->invoke($file);
         } catch (Throwable $e) {
             throw new ConfigException(
                 sprintf('Failed to load PHP configuration file "%s": %s', $file, $e->getMessage()),

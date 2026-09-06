@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Componenta\Config;
 
-use InvalidArgumentException;
+use Componenta\Config\Exception\InvalidConfigArgumentException;
 
 final readonly class ContainerEntry
 {
@@ -16,11 +16,11 @@ final readonly class ContainerEntry
         ?string $type = null,
     ) {
         if ($id === '') {
-            throw new InvalidArgumentException('Container entry id must not be empty.');
+            throw new InvalidConfigArgumentException('Container entry id must not be empty.');
         }
 
         if ($type === '') {
-            throw new InvalidArgumentException('Container entry type must not be empty.');
+            throw new InvalidConfigArgumentException('Container entry type must not be empty.');
         }
 
         if ($type !== null
@@ -28,7 +28,7 @@ final readonly class ContainerEntry
             && !interface_exists($type)
             && !enum_exists($type)
         ) {
-            throw new InvalidArgumentException(sprintf(
+            throw new InvalidConfigArgumentException(sprintf(
                 'Container entry type "%s" must name an existing class, interface, or enum.',
                 $type,
             ));

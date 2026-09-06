@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Componenta\Config;
 
 use Closure;
-use Componenta\Config\Exception\ConfigException;
+use Componenta\Config\Exception\ConfigResolutionException;
+use Fiber;
+use stdClass;
 use WeakMap;
 
 /**
@@ -19,21 +21,18 @@ final class LazyValue
 {
     private readonly Closure $callback;
 
+    private readonly object $mainExecution;
+
     /** @var WeakMap<object, array{mixed}>|null */
     private ?WeakMap $values = null;
 
-    /** @var WeakMap<object, true>|null */
+    /** @var WeakMap<object, WeakMap<object, true>>|null */
     private ?WeakMap $resolving = null;
 
     public function __construct(callable $callback, public readonly bool $cache = true)
     {
         $this->callback = Closure::fromCallable($callback);
-    }
-
-    /** @internal Used by the persistent config exporter. */
-    public function callback(): Closure
-    {
-        return $this->callback;
+        $this->mainExecution = new stdClass();
     }
 
     public function resolve(Config|ContainerValue $context): mixed
@@ -45,21 +44,30 @@ final class LazyValue
             }
         }
 
+        $execution = Fiber::getCurrent() ?? $this->mainExecution;
         $resolving = $this->resolving ??= new WeakMap();
-        if (isset($resolving[$context])) {
-            throw new ConfigException('Circular LazyValue resolution detected for the same runtime context.');
+        $executions = $resolving[$context] ??= new WeakMap();
+
+        if (isset($executions[$execution])) {
+            throw ConfigResolutionException::lazyValueCycle();
         }
 
-        $resolving[$context] = true;
+        $executions[$execution] = true;
         try {
             $value = ($this->callback)($context);
             if ($this->cache) {
                 $values = $this->values ??= new WeakMap();
-                $values[$context] = [$value];
+                if (!isset($values[$context])) {
+                    $values[$context] = [$value];
+                }
             }
             return $value;
         } finally {
-            unset($resolving[$context]);
+            unset($executions[$execution]);
+
+            if (count($executions) === 0) {
+                unset($resolving[$context]);
+            }
         }
     }
 }

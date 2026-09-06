@@ -4,24 +4,19 @@ declare(strict_types=1);
 
 namespace Componenta\Config;
 
-use Componenta\Config\Exception\ConfigException;
 use Componenta\Config\Exception\InvalidContainerValueException;
 use Psr\Container\ContainerInterface;
 
 final readonly class ContainerValue implements ContainerInterface
 {
-    public Config $config;
-
     public function __construct(
-        public ContainerInterface $value,
-        ?Config $config = null,
-    ) {
-        $this->config = $config ?? $this->resolveConfig();
-    }
+        public ContainerInterface $container,
+        public Config $config,
+    ) {}
 
     public function has(string $id): bool
     {
-        return $this->value->has($id);
+        return $this->container->has($id);
     }
 
     /**
@@ -31,7 +26,7 @@ final readonly class ContainerValue implements ContainerInterface
      */
     public function get(string $id, ?string $type = null): mixed
     {
-        $service = $this->value->get($id);
+        $service = $this->container->get($id);
 
         if ($type === null) {
             return $service;
@@ -46,7 +41,7 @@ final readonly class ContainerValue implements ContainerInterface
 
     public function find(string $id, mixed $default = null): mixed
     {
-        if ($this->value->has($id)) {
+        if ($this->container->has($id)) {
             $type = $default instanceof ContainerEntry ? $default->type : null;
 
             return $this->get($id, $type);
@@ -69,17 +64,5 @@ final readonly class ContainerValue implements ContainerInterface
         }
 
         return $default;
-    }
-
-    private function resolveConfig(): Config
-    {
-        if (!$this->value->has(Config::class)) {
-            throw new ConfigException(sprintf(
-                'Wrapped container must expose "%s" or Config must be provided explicitly.',
-                Config::class,
-            ));
-        }
-
-        return $this->get(Config::class, Config::class);
     }
 }

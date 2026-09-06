@@ -5,16 +5,17 @@ declare(strict_types=1);
 namespace Componenta\Config;
 
 use Componenta\Config\Exception\ConfigException;
+use Componenta\Config\Exception\InvalidConfigArgumentException;
 use Componenta\Config\Reader\FileReaderInterface;
 use Componenta\Config\Reader\JsonFileReader;
 use Componenta\Config\Reader\PhpFileReader;
-use InvalidArgumentException;
 
 /**
- * Loads every file matched by a glob pattern and merges them in sorted order.
+ * Reads every file matched by a glob pattern in deterministic lexical order.
  *
- * A matched file must be handled by one configured reader. Unsupported,
- * unreadable or malformed files fail fast instead of being silently ignored.
+ * Each file produces one contribution for the ConfigFactory fold. A matched
+ * file must be handled by one configured reader. Unsupported, unreadable or
+ * malformed files fail fast instead of being silently ignored.
  */
 final class FileProvider
 {
@@ -26,12 +27,24 @@ final class FileProvider
         private readonly string $pattern,
         ?iterable $readers = null,
     ) {
+        if ($pattern === '') {
+            throw new InvalidConfigArgumentException(
+                'Configuration glob pattern must be non-empty.',
+            );
+        }
+
+        if (str_contains($pattern, "\0")) {
+            throw new InvalidConfigArgumentException(
+                'Configuration glob pattern must not contain null bytes.',
+            );
+        }
+
         $readers ??= [new PhpFileReader(), new JsonFileReader()];
 
         $normalized = [];
         foreach ($readers as $reader) {
             if (!$reader instanceof FileReaderInterface) {
-                throw new InvalidArgumentException(sprintf(
+                throw new InvalidConfigArgumentException(sprintf(
                     'Configuration reader must implement %s; got %s.',
                     FileReaderInterface::class,
                     get_debug_type($reader),
@@ -44,37 +57,25 @@ final class FileProvider
         $this->readers = $normalized;
     }
 
-    /** @return array<array-key, mixed> */
-    public function __invoke(): array
+    /** @return iterable<array<array-key, mixed>> */
+    public function __invoke(): iterable
     {
-        /** @var array<array-key, mixed> $config */
-        $config = [];
-
         foreach ($this->files() as $file) {
-            $handled = false;
-
             foreach ($this->readers as $reader) {
                 $data = $reader->readFile($file);
                 if ($data === null) {
                     continue;
                 }
 
-                $handled = true;
-                if ($data !== []) {
-                    $config = config_merge($config, $data);
-                }
-                break;
+                yield $data;
+                continue 2;
             }
 
-            if (!$handled) {
-                throw new ConfigException(sprintf(
-                    'No configuration reader supports file "%s".',
-                    $file,
-                ));
-            }
+            throw new ConfigException(sprintf(
+                'No configuration reader supports file "%s".',
+                $file,
+            ));
         }
-
-        return $config;
     }
 
     /** @return list<string> */
