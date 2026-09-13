@@ -79,3 +79,32 @@ it('rejects a LazyValue result cycle instead of looping forever', function (): v
         'LazyValue -> LazyValue',
     );
 });
+
+it('keeps the recursion guard for a suspended Fiber after another Fiber finishes', function (): void {
+    $calls = 0;
+    $lazy = null;
+    $context = new Config([], new Environment([]));
+    $lazy = new LazyValue(static function () use (&$calls, &$lazy, $context): string {
+        ++$calls;
+        if ($calls === 1) {
+            Fiber::suspend('pending');
+            if ($lazy === null) {
+                throw new \LogicException('LazyValue fixture is not initialized.');
+            }
+            $lazy->resolve($context);
+            throw new \LogicException('Recursive resolution unexpectedly returned.');
+        }
+        if ($calls === 2) {
+            return 'concurrent';
+        }
+        throw new \LogicException('A recursive callback must not execute again.');
+    }, cache: false);
+    $first = new Fiber(static fn(): mixed => $lazy->resolve($context));
+    expect($first->start())->toBe('pending');
+    $second = new Fiber(static fn(): mixed => $lazy->resolve($context));
+    $second->start();
+
+    expect($second->getReturn())->toBe('concurrent')
+        ->and(fn() => $first->resume())->toThrow(ConfigResolutionException::class)
+        ->and($calls)->toBe(2);
+});

@@ -41,29 +41,15 @@ final readonly class Environment implements \Countable, \IteratorAggregate, Arra
     /** @param list<string>|null $keys */
     public static function fromGlobals(?array $keys = null): self
     {
-        /** @var array<string, mixed> $data */
-        $data = [];
+        $data = self::namedValues(getenv());
 
-        foreach (getenv() as $key => $value) {
-            if ($key !== '') {
+        foreach (self::namedValues($_SERVER) as $key => $value) {
+            if (is_string($value) || is_int($value) || is_float($value) || is_bool($value)) {
                 $data[$key] = $value;
             }
         }
 
-        foreach ($_SERVER as $key => $value) {
-            if (is_string($key)
-                && $key !== ''
-                && (is_string($value) || is_int($value) || is_float($value) || is_bool($value))
-            ) {
-                $data[$key] = $value;
-            }
-        }
-
-        foreach ($_ENV as $key => $value) {
-            if (is_string($key) && $key !== '') {
-                $data[$key] = $value;
-            }
-        }
+        $data = array_replace($data, self::namedValues($_ENV));
 
         if ($keys !== null) {
             $data = array_intersect_key($data, array_fill_keys($keys, true));
@@ -229,6 +215,21 @@ final readonly class Environment implements \Countable, \IteratorAggregate, Arra
     public function getIterator(): \Traversable
     {
         return new \ArrayIterator($this->data);
+    }
+
+    /**
+     * @param array<array-key, mixed> $values
+     * @return array<string, mixed>
+     */
+    private static function namedValues(array $values): array
+    {
+        $named = [];
+        foreach ($values as $key => $value) {
+            if (is_string($key) && $key !== '') {
+                $named[$key] = $value;
+            }
+        }
+        return $named;
     }
 
     private function normalize(string|ConfigPath $key): string

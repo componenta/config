@@ -411,6 +411,10 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
         $lastIndex = array_key_last($segments);
 
         foreach ($segments as $i => $segment) {
+            if (!is_array($current)) {
+                return;
+            }
+
             if ($i === $lastIndex) {
                 unset($current[$segment]);
                 return;
@@ -419,6 +423,9 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
             if (!isset($current[$segment]) || !is_array($current[$segment])) {
                 return;
             }
+
+            // Detach reference slots before editing a branch of the filtered copy.
+            $current = array_map(static fn(mixed $value): mixed => $value, $current);
 
             $current = &$current[$segment];
         }

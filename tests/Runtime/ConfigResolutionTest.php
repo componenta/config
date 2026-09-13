@@ -103,3 +103,14 @@ it('limits descriptor chains without rejecting the supported boundary', function
             'maximum depth of 64',
         );
 });
+
+it('enforces the array resolution depth boundary without rejecting the deepest allowed value', function (): void {
+    $value = 'leaf';
+    for ($depth = 0; $depth < 64; ++$depth) {
+        $value = ['node' => $value];
+    }
+    $config = new Config(['allowed' => $value, 'too-deep' => ['node' => $value]], new Environment([]));
+
+    expect($config->get('allowed'))->toBe($value)
+        ->and(fn() => $config->get('too-deep'))->toThrow(ConfigResolutionException::class, '64');
+});

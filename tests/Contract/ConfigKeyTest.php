@@ -5,11 +5,7 @@ declare(strict_types=1);
 namespace Componenta\Config\Tests\Contract;
 
 use Componenta\Config\ConfigKey;
-
-final class PackageConfigKeyFixture extends ConfigKey
-{
-    public const string FEATURE_FLAG = 'package.feature_flag';
-}
+use Componenta\Config\Tests\Support\PackageConfigKeyFixture;
 
 it('allows package config key classes to inherit the shared schema and add package keys', function (): void {
     expect(PackageConfigKeyFixture::DEPENDENCIES)->toBe(ConfigKey::DEPENDENCIES)

@@ -171,3 +171,36 @@ it('rejects invalid glob patterns through the package exception contract', funct
         'null bytes',
     );
 });
+
+it('loads supported extensions irrespective of letter case', function (string $filename, string $contents): void {
+    $directory = fileProviderDirectory();
+    file_put_contents($directory . '/' . $filename, $contents);
+
+    try {
+        expect(iterator_to_array((new FileProvider($directory . '/*'))(), false))
+            ->toBe([['enabled' => true]]);
+    } finally {
+        removeFileProviderDirectory($directory);
+    }
+})->with([
+    'PHP' => ['config.PHP', '<?php return ["enabled" => true];'],
+    'JSON' => ['config.JsOn', '{"enabled":true}'],
+]);
+
+it('accepts an empty contribution from the first supporting custom reader', function (): void {
+    $directory = fileProviderDirectory();
+    file_put_contents($directory . '/config.php', '<?php return ["unexpected" => true];');
+    $reader = new class () implements FileReaderInterface {
+        public function readFile(string $file): array
+        {
+            return [];
+        }
+    };
+
+    try {
+        expect(iterator_to_array((new FileProvider($directory . '/*', [$reader]))(), false))
+            ->toBe([[]]);
+    } finally {
+        removeFileProviderDirectory($directory);
+    }
+});

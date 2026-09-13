@@ -3,10 +3,24 @@
     "description": "Composable configuration and runtime environment access for PHP 8.4+",
     "type": "library",
     "license": "MIT",
-    "keywords": ["config", "configuration", "dotenv", "environment", "settings", "dependency-injection"],
-    "authors": [{"name": "Componenta"}],
+    "keywords": [
+        "config",
+        "configuration",
+        "dotenv",
+        "environment",
+        "settings",
+        "dependency-injection"
+    ],
+    "authors": [
+        {
+            "name": "Componenta"
+        }
+    ],
     "homepage": "https://github.com/componenta/config",
-    "support": {"issues": "https://github.com/componenta/config/issues", "source": "https://github.com/componenta/config"},
+    "support": {
+        "issues": "https://github.com/componenta/config/issues",
+        "source": "https://github.com/componenta/config"
+    },
     "require": {
         "php": "^8.4",
         "componenta/arrayable": "^1.0",
@@ -17,24 +31,48 @@
         "pestphp/pest": "^4.0",
         "phpstan/phpstan": "^2.1"
     },
-    "autoload": {"psr-4": {"Componenta\\Config\\": "src/"}, "files": ["src/functions.php"]},
-    "autoload-dev": {"psr-4": {"Componenta\\Config\\Tests\\": "tests/"}},
+    "autoload": {
+        "psr-4": {
+            "Componenta\\Config\\": "src/"
+        },
+        "files": [
+            "src/functions.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Componenta\\Config\\Tests\\": "tests/"
+        }
+    },
     "scripts": {
         "test": "pest",
         "test-coverage": "pest --coverage --min=80",
-        "test-mutation": "pest --mutate --path=src --min=80",
+        "test-mutation": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php -d opcache.enable_cli=0 tests/mutate.php --mutate --path=src --everything --min=85 --compact"
+        ],
         "phpstan": "phpstan analyse src tests --level=max",
         "cs-check": "php-cs-fixer fix --dry-run --diff",
         "cs-fix": "php-cs-fixer fix",
-        "check": ["@cs-check", "@phpstan", "@test"]
+        "check": [
+            "@cs-check",
+            "@phpstan",
+            "@test"
+        ]
     },
     "config": {
-        "allow-plugins": {"pestphp/pest-plugin": true},
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        },
         "sort-packages": true,
         "preferred-install": "dist",
         "optimize-autoloader": true
     },
     "minimum-stability": "stable",
     "prefer-stable": true,
-    "extra": {"branch-alias": {"dev-main": "3.x-dev"}}
+    "extra": {
+        "branch-alias": {
+            "dev-main": "3.0.x-dev"
+        }
+    }
 }

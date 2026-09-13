@@ -46,7 +46,9 @@ final class LazyValue
 
         $execution = Fiber::getCurrent() ?? $this->mainExecution;
         $resolving = $this->resolving ??= new WeakMap();
-        $executions = $resolving[$context] ??= new WeakMap();
+        /** @var WeakMap<object, true> $executions */
+        $executions = $resolving[$context] ?? new WeakMap();
+        $resolving[$context] = $executions;
 
         if (isset($executions[$execution])) {
             throw ConfigResolutionException::lazyValueCycle();

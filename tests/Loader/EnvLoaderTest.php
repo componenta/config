@@ -14,15 +14,36 @@ function envLoaderRuntime(): string
     return sys_get_temp_dir() . '/componenta_env_loader_' . getmypid();
 }
 
+/** @return list<string> */
+function envLoaderKeys(): array
+{
+    return ['APP_ENV', 'APP_NAME', 'APP_KEY', 'DEBUG', 'BASE', 'LOCAL', 'KEY', 'MESSAGE', 'ESCAPED', 'FILE_ONLY', 'PROCESS_ONLY', 'IGNORED_SAMPLE', 'INVALID_SERVER'];
+}
+
 function clearEnvLoaderKeys(): void
 {
-    foreach (['APP_ENV', 'APP_NAME', 'DEBUG', 'BASE', 'LOCAL', 'KEY', 'MESSAGE', 'ESCAPED', 'FILE_ONLY', 'PROCESS_ONLY', 'IGNORED_SAMPLE', 'INVALID_SERVER'] as $key) {
+    foreach (envLoaderKeys() as $key) {
         unset($_ENV[$key], $_SERVER[$key]);
         putenv($key);
     }
 }
 
-beforeEach(function (): void {
+$restoreEnvironment = static function (): void {};
+
+beforeEach(function () use (&$restoreEnvironment): void {
+    $environment = $_ENV;
+    $server = $_SERVER;
+    $process = [];
+    foreach (envLoaderKeys() as $key) {
+        $process[$key] = getenv($key);
+    }
+    $restoreEnvironment = static function () use ($environment, $server, $process): void {
+        $_ENV = $environment;
+        $_SERVER = $server;
+        foreach ($process as $key => $value) {
+            putenv($value === false ? $key : $key . '=' . $value);
+        }
+    };
     clearEnvLoaderKeys();
     @mkdir(envLoaderRuntime(), 0700, true);
     foreach ([envLoaderRuntime() . '/*', envLoaderRuntime() . '/.*'] as $pattern) {
@@ -34,8 +55,8 @@ beforeEach(function (): void {
     }
 });
 
-afterEach(function (): void {
-    clearEnvLoaderKeys();
+afterEach(function () use (&$restoreEnvironment): void {
+    $restoreEnvironment();
     foreach ([envLoaderRuntime() . '/*', envLoaderRuntime() . '/.*'] as $pattern) {
         foreach (glob($pattern) ?: [] as $file) {
             if (is_file($file)) {
@@ -149,4 +170,73 @@ it('rejects unsafe filenames and invalid required names', function (): void {
         ->toThrow(InvalidConfigArgumentException::class)
         ->and(fn() => new EnvLoader(envLoaderRuntime(), required: ['BAD-NAME']))
         ->toThrow(InvalidConfigArgumentException::class);
+});
+
+it('rejects an escaped final quote instead of treating it as a closing delimiter', function (int $slashes): void {
+    file_put_contents(envLoaderRuntime() . '/.env', 'KEY="secret' . str_repeat(chr(92), $slashes) . '"');
+
+    expect(fn() => (new EnvLoader(envLoaderRuntime()))->read())
+        ->toThrow(EnvLoaderException::class, 'unbalanced');
+})->with([1, 3]);
+
+it('preserves quote and backslash semantics in complete dotenv values', function (string $source, string $expected): void {
+    file_put_contents(envLoaderRuntime() . '/.env', 'KEY=' . $source);
+
+    expect((new EnvLoader(envLoaderRuntime()))->read())->toBe(['KEY' => $expected]);
+})->with([
+    'empty double quoted' => ['""', ''],
+    'one escaped backslash before closing quote' => ['"value' . str_repeat(chr(92), 2) . '"', 'value' . chr(92)],
+    'two escaped backslashes before closing quote' => ['"value' . str_repeat(chr(92), 4) . '"', 'value' . str_repeat(chr(92), 2)],
+    'escaped quote inside value' => ['"say ' . chr(92) . '"hello' . chr(92) . '""', 'say "hello"'],
+    'literal single quoted escapes' => ["'" . 'line\n' . chr(92) . "'", 'line\n' . chr(92)],
+    'double quoted control characters' => ['"line\r\nnext\ttab"', "line\r\nnext\ttab"],
+]);
+
+it('rejects invalid entries in the directory list', function (mixed $path): void {
+    expect(fn() => new EnvLoader([$path]))
+        ->toThrow(InvalidConfigArgumentException::class, 'paths');
+})->with([
+    'empty' => [''],
+    'null byte' => ["bad\0path"],
+    'non-string' => [42],
+    'nested array' => [[]],
+]);
+
+it('rejects invalid entries in the filename list', function (mixed $filename): void {
+    expect(fn() => new EnvLoader(envLoaderRuntime(), filenames: [$filename]))
+        ->toThrow(InvalidConfigArgumentException::class, 'filenames');
+})->with([
+    'empty' => [''],
+    'null byte' => ["bad\0.env"],
+    'non-string' => [42],
+    'nested array' => [[]],
+]);
+
+it('reports the physical line of malformed dotenv assignments', function (string $line, string $reason): void {
+    $file = envLoaderRuntime() . DIRECTORY_SEPARATOR . '.env';
+    file_put_contents($file, "# comment\r\n\r\n" . $line);
+
+    expect(fn() => (new EnvLoader(envLoaderRuntime()))->read())
+        ->toThrow(EnvLoaderException::class, "line 3 in file '{$file}': {$reason}");
+})->with([
+    'no assignment' => ['KEY', 'expected KEY=VALUE assignment'],
+    'invalid name' => ['BAD-NAME=value', 'invalid variable name'],
+    'missing double quote' => ['KEY="value', 'unbalanced'],
+    'missing single quote' => ["KEY='value", 'unbalanced'],
+    'only opening quote' => ['KEY="', 'unbalanced'],
+]);
+
+it('continues past comments and blank lines while preserving empty values and equals signs', function (): void {
+    file_put_contents(envLoaderRuntime() . '/.env', "# comment\r\n\r\n EMPTY = \r\n KEY = a=b#c \r\n");
+
+    expect((new EnvLoader(envLoaderRuntime()))->read())->toBe(['EMPTY' => '', 'KEY' => 'a=b#c']);
+});
+
+it('distinguishes an empty dotenv file from the absence of selected files', function (): void {
+    $loader = new EnvLoader(envLoaderRuntime());
+    expect($loader->read())->toBeNull();
+
+    file_put_contents(envLoaderRuntime() . '/.env', '');
+    expect($loader->read())->toBe([])
+        ->and((new EnvLoader(envLoaderRuntime(), filenames: []))->read())->toBeNull();
 });

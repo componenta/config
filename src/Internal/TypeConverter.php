@@ -52,6 +52,11 @@ final class TypeConverter
                 return null;
             }
 
+            // The upper bound is exclusive: PHP_INT_MAX may round up when converted to float.
+            if ($value < PHP_INT_MIN || $value >= -(float) PHP_INT_MIN) {
+                return null;
+            }
+
             $result = (int) $value;
             return (float) $result === $value ? $result : null;
         }

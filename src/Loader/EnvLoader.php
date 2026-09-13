@@ -176,7 +176,7 @@ final class EnvLoader implements EnvLoaderInterface
     {
         $vars = [];
 
-        foreach (preg_split('/\R/', $content) ?: [] as $lineNumber => $rawLine) {
+        foreach (preg_split('/\r\n|\n|\r/', $content) ?: [] as $lineNumber => $rawLine) {
             $line = trim($rawLine);
 
             if ($line === '' || str_starts_with($line, '#')) {
@@ -223,7 +223,13 @@ final class EnvLoader implements EnvLoaderInterface
         }
 
         $length = strlen($value);
-        if ($length < 2 || $value[$length - 1] !== $quote) {
+        $escapedClosingQuote = false;
+        if ($quote === '"') {
+            for ($index = $length - 2; $index > 0 && $value[$index] === '\\'; --$index) {
+                $escapedClosingQuote = !$escapedClosingQuote;
+            }
+        }
+        if ($length < 2 || $value[$length - 1] !== $quote || $escapedClosingQuote) {
             throw EnvLoaderException::parseError(
                 $filePath,
                 $lineNumber,

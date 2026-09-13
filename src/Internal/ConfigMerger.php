@@ -137,9 +137,13 @@ final class ConfigMerger
                         'ConfigOverride can only be used as a map value; lists are append-only.',
                     );
                 }
+
+                $base[] = is_array($value)
+                    ? self::mergeArray([], $value, depth: $depth + 1)
+                    : $value;
             }
 
-            return [...$base, ...$override];
+            return $base;
         }
 
         foreach ($override as $key => $value) {
@@ -168,7 +172,7 @@ final class ConfigMerger
                 && is_array($value)
             ) {
                 if (array_is_list($base[$key]) !== array_is_list($value)) {
-                    $base[$key] = $value;
+                    $base[$key] = self::mergeArray([], $value, depth: $depth + 1);
                     continue;
                 }
 
@@ -176,7 +180,9 @@ final class ConfigMerger
                 continue;
             }
 
-            $base[$key] = $value;
+            $base[$key] = is_array($value)
+                ? self::mergeArray([], $value, depth: $depth + 1)
+                : $value;
         }
 
         return $base;
