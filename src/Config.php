@@ -9,6 +9,7 @@ use Componenta\Config\Exception\ConfigException;
 use Componenta\Config\Exception\ConfigResolutionException;
 use Componenta\Config\Exception\InvalidConfigArgumentException;
 use Componenta\Config\Exception\InvalidConfigValueException;
+use Componenta\Config\Internal\ArraySnapshot;
 use Componenta\Config\Internal\TypeConverter;
 use Fiber;
 use ReflectionReference;
@@ -34,12 +35,51 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
     /** @var WeakMap<object, list<array{key: string, label: string}>>|null */
     private ?WeakMap $resolutionStacks = null;
 
+    /** @var array<array-key, mixed> */
+    private array $values;
+
+    /** @var array<string, ReflectionReference|false>|null */
+    private ?array $referenceVisibility;
+
+    /** @var array<array-key, mixed> */
+    public array $data {
+        get => $this->referenceVisibility !== null ? ArraySnapshot::copy($this->values) : $this->values;
+    }
+
     /** @param array<array-key, mixed> $data */
     public function __construct(
-        public readonly array $data,
+        array $data,
         public readonly Environment $environment,
     ) {
+        [$this->values, $this->referenceVisibility] = ArraySnapshot::capture($data);
         $this->mainResolutionContext = new stdClass();
+    }
+
+    /** @return array<string, mixed> */
+    public function __serialize(): array
+    {
+        if ($this->resolutionStacks !== null) {
+            throw new \Exception("Serialization of 'WeakMap' is not allowed");
+        }
+
+        return [
+            "\0" . self::class . "\0mainResolutionContext" => new stdClass(),
+            "\0" . self::class . "\0resolutionStacks" => null,
+            'data' => $this->data,
+            'environment' => $this->environment,
+        ];
+    }
+
+    /** @param array{data: array<array-key, mixed>, environment: Environment} $state */
+    public function __unserialize(array $state): void
+    {
+        $this->__construct($state['data'], $state['environment']);
+    }
+
+    public function __clone(): void
+    {
+        $this->mainResolutionContext = new stdClass();
+        $this->resolutionStacks = null;
     }
 
     public function get(
@@ -143,16 +183,17 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
     public function only(int|string|ConfigPath|array $keys): self
     {
         $keys = is_array($keys) ? $keys : [$keys];
+        // Selections may descend into reference cells in the copied arrays.
+        $source = $this->referenceVisibility === null ? $this : $this->filtered($this->values);
         /** @var array<array-key, mixed> $filtered */
         $filtered = [];
 
         foreach ($keys as $key) {
-            if (!$this->has($key)) {
+            $found = false;
+            $value = $source->resolveKey($key, $found);
+            if (!$found) {
                 continue;
             }
-
-            $found = false;
-            $value = $this->resolveKey($key, $found);
 
             if ($key instanceof ConfigPath) {
                 $this->setNestedValue($filtered, $key->toArray(), $value);
@@ -161,14 +202,15 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
             }
         }
 
-        return new self($filtered, $this->environment);
+        return $source->filtered($filtered);
     }
 
     /** @param int|string|ConfigPath|array<int|string|ConfigPath> $keys */
     public function except(int|string|ConfigPath|array $keys): self
     {
         $keys = is_array($keys) ? $keys : [$keys];
-        $filtered = $this->data;
+        $source = $this->referenceVisibility === null ? $this : $this->filtered($this->values);
+        $filtered = $source->values;
 
         foreach ($keys as $key) {
             if ($key instanceof ConfigPath) {
@@ -178,7 +220,7 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
             }
         }
 
-        return new self($filtered, $this->environment);
+        return $source->filtered($filtered);
     }
 
     /** @return array<array-key, mixed> */
@@ -189,7 +231,7 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
 
     public function count(): int
     {
-        return count($this->data);
+        return count($this->values);
     }
 
     /** @return \Traversable<array-key, mixed> */
@@ -316,11 +358,13 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
                     if ($reference !== null) {
                         $referenceId = $reference->getId();
 
-                        if (isset($arrayReferences[$referenceId])) {
-                            throw ConfigResolutionException::arrayCycle($itemPath);
-                        }
+                        if (($this->referenceVisibility[$referenceId] ?? null) !== false) {
+                            if (isset($arrayReferences[$referenceId])) {
+                                throw ConfigResolutionException::arrayCycle($itemPath);
+                            }
 
-                        $childReferences[$referenceId] = true;
+                            $childReferences[$referenceId] = true;
+                        }
                     }
 
                     $resolved[$key] = $this->resolveValueRecursive(
@@ -346,14 +390,9 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
             return $this->resolvePathKey($key->toArray(), $found);
         }
 
-        return $this->resolveLiteralKey($key, $found);
-    }
-
-    private function resolveLiteralKey(int|string $key, bool &$found): mixed
-    {
-        if (array_key_exists($key, $this->data)) {
+        if (array_key_exists($key, $this->values)) {
             $found = true;
-            return $this->data[$key];
+            return $this->values[$key];
         }
 
         $found = false;
@@ -363,7 +402,7 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
     /** @param list<string> $segments */
     private function resolvePathKey(array $segments, bool &$found): mixed
     {
-        $current = $this->data;
+        $current = $this->values;
 
         foreach ($segments as $segment) {
             if (!is_array($current) || !array_key_exists($segment, $current)) {
@@ -376,6 +415,19 @@ final class Config implements \Countable, \IteratorAggregate, \ArrayAccess, Arra
 
         $found = true;
         return $current;
+    }
+
+    /** @param array<array-key, mixed> $data */
+    private function filtered(array $data): self
+    {
+        $snapshot = clone $this;
+        if ($this->referenceVisibility === null) {
+            $snapshot->values = $data;
+        } else {
+            [$snapshot->values, $snapshot->referenceVisibility] = ArraySnapshot::capture($data, $this->referenceVisibility);
+        }
+
+        return $snapshot;
     }
 
     /**

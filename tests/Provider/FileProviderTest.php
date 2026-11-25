@@ -59,6 +59,26 @@ it('returns one contribution per matched file in lexical order without merging',
     }
 });
 
+it('matches files across nested brace alternatives in lexical order', function (): void {
+    $directory = fileProviderDirectory();
+    file_put_contents($directory . '/c.php', '<?php return ["name" => "c"];');
+    file_put_contents($directory . '/a.json', '{"name":"a"}');
+    file_put_contents($directory . '/b.php', '<?php return ["name" => "b"];');
+    file_put_contents($directory . '/other.php', '<?php return ["name" => "other"];');
+
+    try {
+        $provider = new FileProvider($directory . '/{c,{b,a}}.{php,json}');
+
+        expect(iterator_to_array($provider(), false))->toBe([
+            ['name' => 'a'],
+            ['name' => 'b'],
+            ['name' => 'c'],
+        ]);
+    } finally {
+        removeFileProviderDirectory($directory);
+    }
+});
+
 it('keeps file override operations in the single global provider fold', function (): void {
     $directory = fileProviderDirectory();
     file_put_contents(

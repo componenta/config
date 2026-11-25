@@ -39,9 +39,12 @@ final readonly class ContainerValue implements ContainerInterface
         return $service;
     }
 
+    /** @param class-string|null $type */
     public function find(string $id, mixed $default = null, ?string $type = null): mixed
     {
         if ($this->container->has($id)) {
+            $type ??= $default instanceof ContainerEntry ? $default->type : null;
+
             return $this->get($id, $type);
         }
 

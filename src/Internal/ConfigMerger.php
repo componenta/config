@@ -55,15 +55,13 @@ final class ConfigMerger
     ];
 
     /**
-     * @param array<array-key, mixed> $base
+     * @param array<array-key, mixed> $base Previous merge result or an empty array.
      * @param array<array-key, mixed> $override
      * @return array<array-key, mixed>
      */
     public static function merge(array $base, array $override): array
     {
-        self::assertNoReferences($base);
         self::assertNoReferences($override);
-        self::assertMergeableDependencies($base);
         self::assertMergeableDependencies($override);
 
         $baseHasDependencies = array_key_exists(ConfigKey::DEPENDENCIES, $base);
@@ -167,10 +165,7 @@ final class ConfigMerger
                 continue;
             }
 
-            if (array_key_exists($key, $base)
-                && is_array($base[$key])
-                && is_array($value)
-            ) {
+            if (is_array($base[$key]) && is_array($value)) {
                 if (array_is_list($base[$key]) !== array_is_list($value)) {
                     $base[$key] = self::mergeArray([], $value, depth: $depth + 1);
                     continue;
@@ -302,40 +297,38 @@ final class ConfigMerger
             ));
         }
 
-        $allowed = array_fill_keys(ConfigKey::dependencyKeys(), true);
-
         foreach ($dependencies as $key => $value) {
-            if (!is_string($key) || !isset($allowed[$key])) {
+            if (isset(self::ARRAY_DEPENDENCY_SECTIONS[$key])) {
+                if (!is_array($value)) {
+                    throw new ConfigMergeException(sprintf(
+                        'Dependency section "%s" must be an array; got %s.',
+                        $key,
+                        get_debug_type($value),
+                    ));
+                }
+
+                if (isset(self::LIST_DEPENDENCY_SECTIONS[$key]) && !array_is_list($value)) {
+                    throw new ConfigMergeException(sprintf(
+                        'Dependency section "%s" must be a list.',
+                        $key,
+                    ));
+                }
+
+                continue;
+            }
+
+            if (!isset(self::BOOL_DEPENDENCY_SECTIONS[$key])) {
                 throw new ConfigMergeException(sprintf(
                     'Unsupported dependency section "%s".',
                     (string) $key,
                 ));
             }
 
-            if (isset(self::ARRAY_DEPENDENCY_SECTIONS[$key]) && !is_array($value)) {
-                throw new ConfigMergeException(sprintf(
-                    'Dependency section "%s" must be an array; got %s.',
-                    $key,
-                    get_debug_type($value),
-                ));
-            }
-
-            if (isset(self::BOOL_DEPENDENCY_SECTIONS[$key]) && !is_bool($value)) {
+            if (!is_bool($value)) {
                 throw new ConfigMergeException(sprintf(
                     'Dependency section "%s" must be bool; got %s.',
                     $key,
                     get_debug_type($value),
-                ));
-            }
-
-            if (isset(self::LIST_DEPENDENCY_SECTIONS[$key])
-                && is_array($value)
-                && $value !== []
-                && !array_is_list($value)
-            ) {
-                throw new ConfigMergeException(sprintf(
-                    'Dependency section "%s" must be a list.',
-                    $key,
                 ));
             }
         }
@@ -385,29 +378,34 @@ final class ConfigMerger
         self::assertDepth($depth);
 
         foreach ($value as $key => $item) {
-            $itemPath = [...$path, $key];
-
             if (ReflectionReference::fromArrayElement($value, $key) !== null) {
                 throw new ConfigMergeException(sprintf(
                     'Configuration contains a PHP reference at %s.',
-                    self::formatPath($itemPath),
+                    self::formatPath([...$path, $key]),
                 ));
             }
 
             if (is_array($item)) {
-                self::assertNoReferences($item, $itemPath, $depth + 1);
+                self::assertNoReferences($item, [...$path, $key], $depth + 1);
                 continue;
             }
 
-            if ($item instanceof ConfigOverride
-                && !$item->removesKey()
-                && is_array($item->replacement())
-            ) {
-                self::assertNoReferences(
-                    $item->replacement(),
-                    $itemPath,
-                    $depth + 1,
-                );
+            if ($item instanceof ConfigOverride && !$item->removesKey()) {
+                $replacement = $item->replacement();
+                $visited = [];
+                while ($replacement instanceof ConfigOverride && !$replacement->removesKey()) {
+                    $id = spl_object_id($replacement);
+                    if (isset($visited[$id])) {
+                        break;
+                    }
+
+                    $visited[$id] = true;
+                    $replacement = $replacement->replacement();
+                }
+
+                if (is_array($replacement)) {
+                    self::assertNoReferences($replacement, [...$path, $key], $depth + 1);
+                }
             }
         }
     }

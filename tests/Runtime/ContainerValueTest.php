@@ -69,6 +69,24 @@ it('uses a container entry fallback type to validate an existing entry', functio
         ->toBe($clock);
 });
 
+it('rejects an existing entry that fails the fallback type check', function (): void {
+    $container = containerValue([
+        'clock' => new stdClass(),
+        'fallback.clock' => new DateTimeImmutable(),
+    ]);
+
+    expect(fn() => $container->find('clock', new ContainerEntry('fallback.clock', DateTimeInterface::class)))
+        ->toThrow(InvalidContainerValueException::class, DateTimeInterface::class);
+});
+
+it('uses the explicit type for an existing entry when the fallback has its own type', function (): void {
+    $clock = new DateTimeImmutable();
+    $container = containerValue(['clock' => $clock]);
+
+    expect($container->find('clock', new ContainerEntry('fallback.clock', stdClass::class), type: DateTimeInterface::class))
+        ->toBe($clock);
+});
+
 it('rejects empty container entry identifiers and types', function (): void {
     expect(fn() => new ContainerEntry(''))
         ->toThrow(InvalidConfigArgumentException::class, 'id must not be empty')

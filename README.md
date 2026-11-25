@@ -134,6 +134,12 @@ PHP array references and nesting deeper than 64 levels are rejected with
 
 ### Dependency section merge rules
 
+All dependency sections are optional. DI registers its built-in parameter
+resolvers and attribute definitions by default. Use `parameter_resolvers` for
+custom resolvers, `attribute_definitions` to register attributes, and
+`attribute_capabilities` to configure capability limits. A `true` replacement
+flag disables the corresponding default registrations.
+
 - `factories`, `aliases`, `services`, and `parameter_resolvers` merge by
   key; the later entry replaces the earlier entry atomically;
 - numeric `invokables` append, while keyed invokables replace the same key;
@@ -180,6 +186,12 @@ lossless; fractional, overflowing, non-finite, or ambiguous input is rejected.
 application sections. They do not add dependency definitions or eagerly resolve
 the whole configuration graph.
 
+`Config` and `Environment` capture array values when constructed. Editing an
+input array or an exported array leaves the snapshot stable, including when
+the array contains explicit PHP references. Object and resource values are
+shared with the caller. `Config::$data` exposes the raw application sections
+as a read-only property.
+
 ## Runtime descriptors
 
 The helper functions create explicit runtime values:
@@ -212,9 +224,12 @@ subtree while keys are preserved. Descriptor results are also resolved
 recursively. Cycles fail with
 `ConfigResolutionException` and include the resolution path. A cached
 `LazyValue` stores one successful result per `Config` or `ContainerValue`
-context. Exceptions are not cached. Same-Fiber re-entry is a cycle; concurrent
-resolution from another Fiber is allowed, and the first successful completion
-becomes the cached value.
+context. A failed resolution allows a retry. Re-entering the same descriptor in
+the same context and Fiber is a cycle. Another Fiber may resolve concurrently.
+The first successful completion becomes the cached value.
+
+A `Config` clone tracks active lookups independently. A `LazyValue` clone
+inherits completed results and caches later resolutions independently.
 
 ## Environment loading
 
@@ -270,6 +285,10 @@ format.
 identity; `ContainerValue` never discovers, rebuilds, or clones Config. Its
 optional fallbacks support `ContainerEntry`, `ConfigEntry`, `EnvironmentEntry`,
 and `LazyValue`.
+
+For an existing entry, `find()` checks the type passed via `type:` or takes
+the type from a `ContainerEntry` fallback. For a missing entry, `find()`
+returns or resolves the fallback according to its own contract.
 
 ## Errors
 

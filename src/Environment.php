@@ -8,6 +8,7 @@ use Componenta\Arrayable\Arrayable;
 use Componenta\Config\Exception\ConfigException;
 use Componenta\Config\Exception\InvalidConfigArgumentException;
 use Componenta\Config\Exception\InvalidConfigValueException;
+use Componenta\Config\Internal\ArraySnapshot;
 use Componenta\Config\Internal\TypeConverter;
 
 /**
@@ -22,6 +23,7 @@ final readonly class Environment implements \Countable, \IteratorAggregate, Arra
 {
     /** @var array<string, mixed> */
     private array $data;
+    private bool $copyOnRead;
 
     /** @param array<array-key, mixed> $data */
     public function __construct(array $data)
@@ -35,7 +37,25 @@ final readonly class Environment implements \Countable, \IteratorAggregate, Arra
         }
 
         /** @var array<string, mixed> $data */
-        $this->data = $data;
+        [$this->data, $references] = ArraySnapshot::capture($data);
+        $this->copyOnRead = $references !== null;
+    }
+
+    /** @return array<string, array<string, mixed>> */
+    public function __serialize(): array
+    {
+        return ["\0" . self::class . "\0data" => $this->toArray()];
+    }
+
+    /** @param array<string, mixed> $state */
+    public function __unserialize(array $state): void
+    {
+        $data = $state["\0" . self::class . "\0data"] ?? null;
+        if (!is_array($data)) {
+            throw new InvalidConfigArgumentException('Serialized environment data must be an array.');
+        }
+
+        $this->__construct($data);
     }
 
     /** @param list<string>|null $keys */
@@ -63,7 +83,11 @@ final readonly class Environment implements \Countable, \IteratorAggregate, Arra
         $name = $this->normalize($key);
 
         if (array_key_exists($name, $this->data)) {
-            return $this->data[$name];
+            $value = $this->data[$name];
+
+            return is_array($value) && $this->copyOnRead
+                ? ArraySnapshot::copy($value)
+                : $value;
         }
 
         if ($default === DefaultValue::None) {
@@ -175,7 +199,7 @@ final readonly class Environment implements \Countable, \IteratorAggregate, Arra
     /** @return array<string, mixed> */
     public function toArray(): array
     {
-        return $this->data;
+        return $this->copyOnRead ? ArraySnapshot::copy($this->data) : $this->data;
     }
 
     /** @return list<string> */
@@ -198,7 +222,7 @@ final readonly class Environment implements \Countable, \IteratorAggregate, Arra
             $result[$removePrefix ? substr($key, $length) : $key] = $value;
         }
 
-        return $result;
+        return $this->copyOnRead ? ArraySnapshot::copy($result) : $result;
     }
 
     public function count(): int
@@ -214,7 +238,7 @@ final readonly class Environment implements \Countable, \IteratorAggregate, Arra
     /** @return \Traversable<string, mixed> */
     public function getIterator(): \Traversable
     {
-        return new \ArrayIterator($this->data);
+        return new \ArrayIterator($this->toArray());
     }
 
     /**

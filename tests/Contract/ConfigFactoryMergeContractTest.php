@@ -160,22 +160,24 @@ it('rejects PHP references in provider contributions', function (): void {
     );
 });
 
-it('rejects PHP references hidden inside explicit replacements', function (): void {
+it('rejects PHP references hidden inside explicit replacements', function (int $layers): void {
     $value = 'unsafe';
-    $replacement = [];
-    $replacement['value'] = &$value;
+    $replacement = ['value' => &$value];
+    for ($i = 0; $i < $layers; ++$i) {
+        $replacement = ConfigOverride::replace($replacement);
+    }
 
     expect(fn() => (new ConfigFactory())->create(
         new Environment([]),
         static fn(): array => ['settings' => ['safe' => true]],
         static fn(): array => [
-            'settings' => ConfigOverride::replace($replacement),
+            'settings' => $replacement,
         ],
     ))->toThrow(
         ConfigMergeException::class,
         "reference at \$config['settings']['value']",
     );
-});
+})->with([1, 2, 3]);
 
 it('supports explicit subtree replacement and key removal', function (): void {
     $composition = (new ConfigFactory())->create(

@@ -70,6 +70,22 @@ it('reports a ConfigEntry cycle with its resolution path', function (): void {
     );
 });
 
+it('allows a copy to read the same key while the original is resolving it', function (): void {
+    $readCopy = true;
+    $lazy = new LazyValue(static function (Config $context) use (&$readCopy): string {
+        if (!$readCopy) {
+            return 'value in copy';
+        }
+
+        $readCopy = false;
+
+        return (clone $context)->string('value');
+    });
+    $config = new Config(['value' => $lazy], new Environment([]));
+
+    expect($config->string('value'))->toBe('value in copy');
+});
+
 it('reports recursive array references through the typed resolution contract', function (): void {
     $recursive = [];
     $recursive['self'] = &$recursive;

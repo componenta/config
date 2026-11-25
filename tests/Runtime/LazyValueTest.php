@@ -67,6 +67,39 @@ it('does not cache exceptions and permits a later retry', function (): void {
         ->and($calls)->toBe(2);
 });
 
+it('can resolve a copy of a lazy descriptor while the original is active', function (): void {
+    $lazy = null;
+    $lazy = new LazyValue(static function (Config $context) use (&$lazy): mixed {
+        $original = $lazy;
+        if ($original === null) {
+            return 'value in copy';
+        }
+
+        $lazy = null;
+
+        return (clone $original)->resolve($context);
+    });
+
+    expect($lazy->resolve(new Config([], new Environment([]))))->toBe('value in copy');
+});
+
+it('copies completed lazy results and memoizes later contexts independently', function (): void {
+    $calls = 0;
+    $lazy = new LazyValue(static function () use (&$calls): int {
+        return ++$calls;
+    });
+    $initial = new Config([], new Environment([]));
+    $later = new Config([], $initial->environment);
+
+    $lazy->resolve($initial);
+    $copy = clone $lazy;
+
+    expect($copy->resolve($initial))->toBe(1)
+        ->and($lazy->resolve($later))->toBe(2)
+        ->and($copy->resolve($later))->toBe(3)
+        ->and($copy->resolve($later))->toBe(3);
+});
+
 it('rejects a LazyValue result cycle instead of looping forever', function (): void {
     $lazy = null;
     $lazy = new LazyValue(static function () use (&$lazy): mixed {

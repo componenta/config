@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Componenta\Config\Tests\Architecture;
 
+use PhpToken;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use RuntimeException;
@@ -38,7 +39,19 @@ it('uses strict types throughout Config source files', function (): void {
         }
 
         $source = file_get_contents($file->getPathname());
+        if ($source === false) {
+            throw new RuntimeException('Cannot read source file ' . $file->getPathname());
+        }
 
-        expect($source)->toStartWith("<?php\n\ndeclare(strict_types=1);");
+        $tokens = array_filter(
+            PhpToken::tokenize($source),
+            static fn(PhpToken $token): bool => !$token->isIgnorable(),
+        );
+        $declaration = array_map(
+            static fn(PhpToken $token): string => $token->is(T_DECLARE) ? 'declare' : $token->text,
+            array_slice($tokens, 0, 7),
+        );
+
+        expect($declaration)->toBe(['declare', '(', 'strict_types', '=', '1', ')', ';'], $file->getPathname());
     }
 });

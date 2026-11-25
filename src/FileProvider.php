@@ -6,6 +6,7 @@ namespace Componenta\Config;
 
 use Componenta\Config\Exception\ConfigException;
 use Componenta\Config\Exception\InvalidConfigArgumentException;
+use Componenta\Config\Internal\GlobPattern;
 use Componenta\Config\Reader\FileReaderInterface;
 use Componenta\Config\Reader\JsonFileReader;
 use Componenta\Config\Reader\PhpFileReader;
@@ -81,7 +82,23 @@ final class FileProvider
     /** @return list<string> */
     private function files(): array
     {
-        $files = glob($this->pattern, GLOB_BRACE);
+        if (defined('GLOB_BRACE')) {
+            $files = glob($this->pattern, GLOB_BRACE);
+        } else {
+            $files = [];
+            foreach (GlobPattern::expandBraces($this->pattern) as $pattern) {
+                $matches = glob($pattern, GLOB_NOSORT);
+                if ($matches === false) {
+                    $files = false;
+                    break;
+                }
+
+                foreach ($matches as $file) {
+                    $files[] = $file;
+                }
+            }
+        }
+
         if ($files === false) {
             throw new ConfigException(sprintf(
                 'Invalid configuration glob pattern "%s".',

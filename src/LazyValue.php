@@ -35,6 +35,13 @@ final class LazyValue
         $this->mainExecution = new stdClass();
     }
 
+    public function __clone(): void
+    {
+        $this->mainExecution = new stdClass();
+        $this->values = $this->values === null ? null : clone $this->values;
+        $this->resolving = null;
+    }
+
     public function resolve(Config|ContainerValue $context): mixed
     {
         if ($this->cache) {
